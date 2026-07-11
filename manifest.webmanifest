@@ -1,0 +1,13 @@
+{
+  "name": "Beacon",
+  "short_name": "Beacon",
+  "description": "Local research IDE for LaTeX and Python.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#16181D",
+  "theme_color": "#16181D",
+  "icons": [
+    { "src": "/logo-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/logo-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

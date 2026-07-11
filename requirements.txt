@@ -1,0 +1,35 @@
+# Beacon dependencies
+# ========================================
+#
+# PYTHON PACKAGES
+# ---------------
+# One optional package enables the full interactive terminal:
+#
+#     pywinpty        Windows pseudo-console (ConPTY) for a real embedded
+#                     terminal where interactive tools (claude, vim, tab
+#                     completion, colors) work inline.
+#
+# Install with:  pip install -r requirements.txt
+#
+# It is OPTIONAL. Without it the app automatically falls back to a simpler
+# line-based terminal (send a command, see the output) and everything else
+# works unchanged. Everything except the interactive terminal uses only the
+# Python standard library. The terminal front end (xterm.js) is vendored in
+# the vendor/ folder, so it needs no download or build.
+#
+# Python: 3.9+ (CPython, includes tkinter). Verified on 3.13.7.
+pywinpty
+#
+#
+# EXTERNAL SYSTEM TOOLS (not Python packages; install separately, on PATH).
+# Each is optional and only affects its own feature.
+#
+#   git            git status, commit, pull, push, sync
+#   latexmk+tlmgr  LaTeX compilation and automatic package install (TinyTeX
+#                  or TeX Live); missing packages install on demand
+#   claude         Claude Code CLI, for the Claude assistant panel
+#   Microsoft Edge preferred UI window (falls back to the default browser)
+#   ollama         optional, free local open-source AI models (ollama.com)
+#
+# Internet access is needed only for the research finder, package installs,
+# and any hosted AI models you choose to use.

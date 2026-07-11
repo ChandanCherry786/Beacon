@@ -1,0 +1,163 @@
+<p align="center">
+  <img src="Logo_icon.png" alt="Beacon" width="128">
+</p>
+
+<h1 align="center">Beacon</h1>
+
+<p align="center">A local research IDE for LaTeX manuscripts and Python code, built for researchers.</p>
+
+Beacon gives you a file tree over any folder, a tabbed editor with Overleaf-style autocomplete and syntax highlighting, embedded PDF and image viewing, a live Markdown reader, one-click LaTeX compile with live preview and automatic package installation, a real interactive terminal, per-folder git with one-click multi-remote sync, an AI assistant with a choice of model (local Ollama, Claude, ChatGPT, Gemini, or Grok), a research finder over OpenAlex and Crossref with publisher-verified authors, LaTeX-to-Word export, and a Pomodoro focus timer.
+
+It is a single Python file plus one page, with one optional dependency (pywinpty, for the interactive terminal). The interface runs in a Microsoft Edge application window (or your default browser), served locally from `127.0.0.1:8347`. Nothing leaves your machine except the lookups and installs you explicitly trigger; any AI API keys you add stay in a git-ignored local file and are never committed.
+
+## Features
+
+- **Open any folder.** No fixed project structure is required. Recent workspaces, quick shortcuts to Home, Documents, Downloads, OneDrive, and Dropbox, and a native folder picker.
+- **Tabbed editor** with syntax highlighting for LaTeX (commands, section headers, `\cite`/`\ref`, environments, math), Python, BibTeX, Markdown, and JSON. Line numbers, word count, and cursor position. Overleaf-style autocomplete for LaTeX commands and environments and for Python keywords, auto-closing brackets and `$`, automatic `\end` when you open a `\begin{}`, block indent with Tab, and comment toggling with Ctrl+/.
+- **Embedded PDF and image viewing.** Open any PDF or image (`.png`, `.jpg`, `.svg`, and more) as a tab and view it beside your source. PDF reading position is preserved across tab switches.
+- **Markdown reader.** Open any `.md` file and its rendered view (headings, tables, code, blockquotes, links) appears live in the Preview pane beside the source, updating as you type and matching the theme.
+- **LaTeX to Word export.** The Tools menu (or Ctrl+Shift+E) converts your paper to a `.docx` with Pandoc, preserving structure, headings, tables, equations, and citations rather than producing a lossy dump.
+- **LaTeX compile with live preview.** Compile the active `.tex` and the typeset page appears in the Preview pane. Compiling a section fragment builds the main document automatically. Missing packages are detected and installed with `tlmgr` without interrupting the build.
+- **Run Python** with your configured interpreter, output streamed live, with a Stop button.
+- **Full interactive terminal** in the workspace, rendered with xterm.js over a real pseudo-console (ConPTY via pywinpty). Interactive tools such as `claude`, `vim`, tab-completion, and colored output work inline. Without pywinpty it falls back to a simpler line-based terminal, so it always works.
+- **Git per folder.** The status badge follows the active file to its nearest repository, classifies each remote as GitHub, Overleaf, or local, and offers commit, pull, push, and fetch. One-click **Publish** (the Sync button, or Ctrl+Shift+S) commits, pulls, then pushes. When a folder has both a GitHub remote and an Overleaf remote it asks where to send the work in plain terms, Overleaf (documents) or GitHub (code) or both, so writing and code publish on your choice; with a single remote it just publishes, and with none it offers to connect one.
+- **Connect a folder to Overleaf or GitHub** (git menu, or Ctrl+Shift+O). Paste the Overleaf git URL and sync token to push a paper folder straight to your Overleaf project, or paste a GitHub repo URL and personal access token to push a code folder to GitHub. A document folder can go to Overleaf and a computational folder to GitHub, each with its own remote, so writing and code publish independently. The dialog links to where each URL and token live. The token is stored only inside that folder's local `.git/config` remote URL, never in the app config, never sent back to the page, and stripped from any error message; the connection is verified against the server before it is saved.
+- **Update from inside the app.** Because Beacon is installed by cloning its GitHub repository, Settings → Software updates checks that repository for new versions and, when the local copy is a clean checkout, fast-forwards to the latest with one click. The update never overwrites local edits (it refuses rather than force) and never touches the git-ignored config, so paths and keys survive; restart to apply.
+- **AI assistant** with a choice of model. Local open-source models through [Ollama](https://ollama.com) are free and need no key (they appear automatically when Ollama is running). Claude models (Fable, Opus, Sonnet, Haiku) run through the Claude Code CLI and can edit files in the workspace. ChatGPT, Gemini, and Grok work as chat once you add your own API key in Settings. API keys are stored only in the git-ignored local config and are never committed. The assistant receives the open file inline so it acts precisely, and can be stopped mid-task.
+- **Research Finder, tuned for power and electrical engineering.** Search papers, books, and preprints by keyword, author, title, or DOI through OpenAlex (covering IEEE, Elsevier, IET, and the rest) or Crossref. Papers from **major power-systems and electrical-engineering venues (IEEE Transactions, Elsevier energy journals, IET, and similar) are boosted to the top and badged with their publisher**, and a "Power & EE only" focus restricts results to those venues. Author names are corrected against the authoritative publisher record. See citation counts and open-access links, copy BibTeX (properly formatted) or a reference in IEEE, Vancouver, APA, MLA, Chicago, Harvard, or Nature style, append to `references.bib` with de-duplication, or open the paper online through a real link.
+- **Pomodoro focus timer** in the toolbar with configurable focus and break lengths and a session counter.
+- **Dark and light themes**, five accent colors, and a choice of editor fonts.
+- **Quick open** (Ctrl+P), **search in files** (Ctrl+Shift+F), file create, rename, and delete, resizable panes, and session tab restore.
+
+## Requirements
+
+The application code needs only Python and its standard library. The features below depend on external tools that are expected to be on `PATH`. Each tool is optional and affects only its own feature.
+
+| Tool | Purpose | Required for |
+| --- | --- | --- |
+| Python 3.9+ (with tkinter) | Runs the server and your Python files | Everything |
+| pywinpty (pip, optional) | Real interactive terminal (falls back to line terminal without it) | Interactive terminal |
+| Git | Status, commit, pull, push, sync | Git features |
+| A TeX distribution with `latexmk` and `tlmgr` (TinyTeX or TeX Live) | LaTeX compilation and package install | Compile |
+| Claude Code CLI (`claude`) | The Claude models in the assistant panel | Claude assistant |
+| Pandoc (optional) | LaTeX to Word (`.docx`) export | Word export |
+| Ollama (optional) | Free local open-source AI models, no key | Local AI |
+| Microsoft Edge | The application window (falls back to your default browser) | Preferred |
+| Internet access | Crossref/OpenAlex/doi.org lookups, `tlmgr` and hosted-AI calls | Finder, auto-install, hosted AI |
+
+The toolkit was developed and verified on Windows 11 with Python 3.13.7, git 2.54, latexmk 4.88 on TinyTeX, and Claude Code 2.1.206. The terminal is PowerShell, so the launcher and terminal features assume Windows.
+
+## Getting started
+
+```bash
+git clone https://github.com/ChandanCherry786/research_workbench.git
+cd research_workbench
+```
+
+**First-time setup (recommended).** Double-click `setup.bat` (or run `powershell -ExecutionPolicy Bypass -File setup.ps1`). It checks for Python, offers to create a local virtual environment, and offers to install anything missing, including a LaTeX distribution (TinyTeX). It never installs anything without asking, and it is safe to run more than once.
+
+Then launch the app.
+
+**Double-click** `run_workbench.bat`. It starts the server without a console window and opens the application window. It uses the `.venv` from setup if present, otherwise any Python on your PATH.
+
+**Or from a terminal:**
+
+```powershell
+python research_workbench.py
+```
+
+Add `--no-browser` to start the server without opening a window.
+
+On first launch, choose a workspace folder. The Run button and terminal use the Python interpreter that launched the server by default; change it any time in Settings.
+
+**Updating.** Open Settings → Software updates and click Check for updates, then Update now, and restart. This is equivalent to running `git pull` in the install folder, so a copy obtained by cloning stays current with the project.
+
+## Usage
+
+Click any file in the tree to open it, or a PDF to read it. Compile the active `.tex` with the Compile button or Ctrl+B, and the result appears in the Preview pane. Run the active `.py` file with the Run button. The bottom dock holds the terminal and the compile, run, and git output, each with a Stop button. The right pane switches between the compiled Preview and the Claude assistant.
+
+### Keyboard shortcuts
+
+| Shortcut | Action |
+| --- | --- |
+| Ctrl+S | Save the active file |
+| Ctrl+B | Compile the active `.tex` |
+| Ctrl+/ | Toggle line comment (LaTeX `%`, Python `#`) |
+| Ctrl+Space | Force autocomplete suggestions |
+| Tab / Shift+Tab | Indent / outdent (or accept a suggestion) |
+| Ctrl+P | Quick open a file by name |
+| Ctrl+Shift+F | Search in files |
+| Ctrl+Shift+K | Research Finder |
+| Ctrl+Shift+E | Export LaTeX to Word |
+| Ctrl+Shift+S | Publish (commit, pull, then push; asks Overleaf or GitHub when both exist) |
+| Ctrl+Shift+O | Connect the folder to Overleaf or GitHub |
+| Ctrl+` | Toggle the bottom dock |
+| Ctrl+, | Open Settings |
+| Ctrl+Enter | Send the Claude message |
+| Esc | Close the open dialog or menu |
+
+### Settings
+
+Open Settings with the gear icon or Ctrl+,. You can set the theme, accent color, editor font and size, the LaTeX compiler (latexmk, a single pdfLaTeX pass, XeLaTeX, or LuaLaTeX), automatic installation of missing LaTeX packages, the Python interpreter, and auto-save. Settings persist across sessions.
+
+## Working with AI coding agents in the terminal
+
+Beacon's terminal is a real interactive shell that opens in your workspace folder, so you can run agentic command-line AI tools directly inside it and let them help you write and revise your work.
+
+Type the tool's command in the terminal and it launches with full access to the files you are editing:
+
+- **Claude Code** — `claude`
+- **OpenAI Codex CLI** — `codex`
+- **Gemini CLI**, **Aider**, or any other terminal AI agent — their usual command
+
+Because the session runs in your workspace, the agent can read and edit your actual `.tex`, `.bib`, and `.py` files: draft a section, tighten prose, fix and format citations, draft responses to reviewers, refactor analysis code, or run experiments. Beacon's editor and preview update live as the agent changes files on disk, so you watch the work happen and keep editing alongside it. Save your files first (Ctrl+S) so the agent sees your latest text, and commit or sync through the git menu when you are happy with the result.
+
+The built-in **Get help with AI** panel is the lighter alternative for single questions with a model picker (local Ollama, Claude, ChatGPT, Gemini, or Grok); the terminal is for full agent sessions.
+
+The interactive terminal needs the optional `pywinpty` package (installed by setup). Without it, run these agents from the **Real terminal** button in the terminal dock, which opens an external console in the same folder.
+
+## Security model
+
+Beacon runs a local server, so it is built to resist a hostile web page you might have open in the same browser.
+
+- **Localhost only.** The server binds to `127.0.0.1`. Every request's `Host` header must be `127.0.0.1`/`localhost`, which defeats DNS rebinding: a malicious site that repoints its hostname at your machine still sends its own domain and is refused.
+- **Per-launch token.** A secret generated at startup is injected into the page and required on every data request (and on the terminal WebSocket). A page on another origin cannot read the page, so it cannot learn the token.
+- **Origin checks.** Every state-changing request and the terminal WebSocket also require a same-origin `Origin`.
+- **Workspace confinement.** File, PDF, and image access is restricted to the current workspace folder (validated with resolved-path containment, so `..`, symlinks, and UNC tricks are rejected).
+- **API keys stay local.** Keys for ChatGPT, Gemini, and Grok live only in the git-ignored config, are never committed, are redacted from every server response (only a "set/not set" flag is returned), and are stripped from any error message. Gemini's key travels in a request header, not a URL. There is no Claude key: the Claude models use your own authenticated Claude Code CLI, capped per task by `--max-budget-usd`.
+- **Constrained AI edits.** The Claude panel runs with `--permission-mode manual` and a restricted tool allowlist, so it can edit files in the workspace and run `latexmk`, `python`, `pdflatex`, and `bibtex`, while out-of-scope write commands are denied.
+- **Safe rendering.** Markdown previews render in a sandboxed frame with scripts disabled, so an untrusted `.md` cannot execute anything or read the token.
+
+## Project layout
+
+```
+research_workbench.py     Local HTTP server and all backend logic
+workbench.html            Single-page front end (HTML, CSS, vanilla JS)
+sw.js                     Service worker (makes the app installable)
+vendor/                   Bundled xterm.js terminal and marked.js markdown renderer
+run_workbench.bat         Windows launcher
+setup.bat / setup.ps1     First-time setup (checks tools, installs deps)
+Logo_icon.png, *.png, favicon.ico, manifest.webmanifest   App icons and PWA manifest
+workbench_config.json     Saved state and API keys (created on first run, git-ignored)
+README.md                 This file
+requirements.txt          Dependencies (one optional pip package)
+LICENSE                   MIT
+```
+
+## Troubleshooting
+
+**A push to Overleaf or a private remote fails with an authentication error.** The remote has no stored credentials. Use the git menu's **Connect Overleaf or GitHub** (Ctrl+Shift+O) to attach the folder with a token, or run one manual `git push` in that repository first so the credential manager caches the token. The app never blocks on a credential prompt: git is run with prompts disabled, so a missing or wrong credential returns a clear error instead of hanging.
+
+**A package fails to install automatically.** The log shows the `tlmgr` command that failed. Run it yourself in the terminal, for example `tlmgr install <package>`, then recompile.
+
+**The Claude panel returns an error immediately.** Confirm `claude` is on `PATH` and signed in by running `claude --version` in a terminal.
+
+**The window does not open on launch.** Start the server manually and open `http://127.0.0.1:8347`. If the port is already in use, an instance is likely already running.
+
+## Limitations
+
+The interactive terminal needs the optional `pywinpty` package (installed by setup). Without it, the terminal falls back to a line-based mode that runs commands and streams output but cannot host interactive full-screen programs; in that mode, use the **Real terminal** button to open an external console, or the AI panel for Claude. The Claude assistant can be restricted from out-of-scope writes, but Claude Code always permits read-only commands such as `git status`, which is a property of the CLI rather than this app. The Claude assistant can be prevented from making out-of-scope writes, but Claude Code always permits read-only commands such as `git status`, which is a property of the CLI rather than this app.
+
+## License
+
+Released under the MIT License. See `LICENSE`.

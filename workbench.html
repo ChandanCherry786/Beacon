@@ -1,0 +1,2811 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Beacon</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="64x64" href="/logo-64.png">
+<link rel="icon" type="image/png" sizes="180x180" href="/logo-180.png">
+<link rel="apple-touch-icon" href="/logo-180.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#16181D">
+<link rel="stylesheet" href="/vendor/xterm.css">
+<script src="/vendor/xterm.js"></script>
+<script src="/vendor/xterm-addon-fit.js"></script>
+<script src="/vendor/marked.min.js"></script>
+<style>
+:root {
+  --ink-900:#16181D; --ink-850:#1A1D23; --ink-800:#1E2127; --ink-700:#262A31;
+  --ink-600:#333842; --ink-500:#454B57;
+  --text:#D6D9DE; --dim:#8B919B; --faint:#5C626D;
+  --paper:#F3EEE3; --paper-dim:#C9C2B2;
+  --clay:#D97757; --amber:#E3A146; --ok:#8FBB7F; --err:#D4766C;
+  --frame:#F3EEE3; --sel:#2E3440;
+  --hl-kw:#DB9E63; --hl-str:#8FBB7F; --hl-cmt:#5C626D; --hl-num:#6FB3C7;
+  --hl-pun:#8B919B; --hl-dec:#D97757; --hl-math:#6FB3C7;
+  --hl-sec:#E88E6B; --hl-env:#D4C27A; --hl-ref:#7FC4D8; --hl-fn:#B8A7E8;
+  --shadow:rgba(0,0,0,.55);
+  --serif:"Segoe UI Variable Display",Constantia,Georgia,serif;
+  --sans:"Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;
+  --mono:"Cascadia Mono",Consolas,monospace;
+  --edfont:"Cascadia Mono","Cascadia Code",Consolas,monospace;
+  --edsize:12px;
+  --glow:color-mix(in srgb, var(--clay) 22%, transparent);
+}
+/* Accent color choices, tuned per theme for contrast on each background. */
+:root[data-accent="ocean"]  { --clay:#5AA9C9; }
+:root[data-accent="forest"] { --clay:#7FB069; }
+:root[data-accent="violet"] { --clay:#A98BE0; }
+:root[data-accent="gold"]   { --clay:#E0AC5A; }
+html[data-theme="light"][data-accent="ocean"]  { --clay:#2E7D9E; }
+html[data-theme="light"][data-accent="forest"] { --clay:#4F7D43; }
+html[data-theme="light"][data-accent="violet"] { --clay:#6B4FA3; }
+html[data-theme="light"][data-accent="gold"]   { --clay:#A97417; }
+html[data-theme="light"] {
+  --ink-900:#F8F5EE; --ink-850:#EFEBE0; --ink-800:#F3EFE6; --ink-700:#E7E1D3;
+  --ink-600:#CFC8B6; --ink-500:#B4AC97;
+  --text:#26282D; --dim:#666B74; --faint:#8E8878;
+  --paper:#FDFBF6; --paper-dim:#6B6558;
+  --clay:#B85C3E; --amber:#A97417; --ok:#4F7D43; --err:#B0402F;
+  --frame:#262A31; --sel:#DCD5C4;
+  --hl-kw:#9A5B1E; --hl-str:#3E6E35; --hl-cmt:#9A947F; --hl-num:#2E6E86;
+  --hl-pun:#77716A; --hl-dec:#B85C3E; --hl-math:#2E6E86;
+  --hl-sec:#A8442A; --hl-env:#8A7420; --hl-ref:#20708E; --hl-fn:#6B4FA3;
+  --shadow:rgba(60,50,30,.35);
+}
+* { box-sizing:border-box; margin:0; padding:0; }
+html,body { height:100%; }
+body { background:var(--ink-900); color:var(--text); font:13px/1.45 var(--sans);
+  overflow:hidden; -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }
+#app { animation:appin .28s ease-out; }
+@keyframes appin { from { opacity:0; } to { opacity:1; } }
+button { font:inherit; color:inherit; background:none; border:none; cursor:pointer;
+  transition:background .12s ease, color .12s ease, border-color .12s ease, box-shadow .12s ease; }
+button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible, [tabindex]:focus-visible {
+  outline:2px solid var(--clay); outline-offset:-2px; }
+::-webkit-scrollbar { width:10px; height:10px; }
+::-webkit-scrollbar-thumb { background:var(--ink-600); border-radius:5px; }
+::-webkit-scrollbar-track { background:transparent; }
+::selection { background:var(--sel); }
+
+/* ---------- frame ---------- */
+#app { display:grid; height:100vh;
+  grid-template-rows:40px 1fr auto;
+  grid-template-columns:240px 5px 1fr 5px 460px;
+  grid-template-areas:"top top top top top" "side gl mid gr right" "dock dock dock dock dock"; }
+#topbar { grid-area:top; display:flex; align-items:center; gap:8px; padding:0 12px;
+  background:linear-gradient(180deg, var(--ink-800), var(--ink-850));
+  border-bottom:1px solid var(--ink-700); box-shadow:0 1px 0 rgba(0,0,0,.15); }
+#side { grid-area:side; display:flex; flex-direction:column; min-height:0; min-width:0;
+  background:var(--ink-850); border-right:1px solid var(--ink-700); }
+#mid { grid-area:mid; display:flex; flex-direction:column; min-width:200px; min-height:0;
+  background:var(--ink-900); }
+#right { grid-area:right; display:flex; flex-direction:column; min-width:240px; min-height:0;
+  background:var(--ink-850); border-left:1px solid var(--ink-700); }
+#dock { grid-area:dock; display:flex; flex-direction:column;
+  background:var(--ink-850); border-top:1px solid var(--ink-700); height:220px; }
+#dock.closed { height:29px !important; }
+#dock.closed #dockbody, #dock.closed #dockgrip { display:none; }
+#gl, #gr { grid-row:2; cursor:col-resize; background:transparent; }
+#gl:hover, #gr:hover { background:var(--ink-600); }
+#gl { grid-area:gl; } #gr { grid-area:gr; }
+#dockgrip { height:4px; cursor:row-resize; flex:none; }
+#dockgrip:hover { background:var(--ink-600); }
+
+/* ---------- top bar ---------- */
+#wordmark { font-family:var(--sans); font-weight:600; letter-spacing:.012em;
+  font-size:15px; color:var(--text); white-space:nowrap; user-select:none;
+  display:flex; align-items:center; gap:9px; }
+#brandlogo { width:26px; height:26px; border-radius:6px; flex:none; object-fit:cover;
+  box-shadow:0 1px 6px rgba(0,0,0,.4); }
+.iconbtn { width:28px; height:26px; border-radius:4px; color:var(--dim); display:flex;
+  align-items:center; justify-content:center; font-size:14px; flex:none; }
+.iconbtn:hover:not(:disabled) { background:var(--ink-700); color:var(--text); }
+.iconbtn:disabled { opacity:.3; cursor:default; }
+#rootwrap { display:flex; align-items:center; }
+#rootbtn { display:flex; align-items:center; gap:6px; max-width:30vw;
+  background:var(--ink-700); border:1px solid var(--ink-600); border-radius:4px 0 0 4px;
+  padding:3px 10px; color:var(--dim); font-family:var(--mono); font-size:12px; }
+#rootbtn:hover { color:var(--text); border-color:var(--ink-500); }
+#rootbtn span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#recentbtn { background:var(--ink-700); border:1px solid var(--ink-600); border-left:none;
+  border-radius:0 4px 4px 0; padding:3px 7px; color:var(--dim); font-size:10px; }
+#recentbtn:hover { color:var(--text); }
+.menu { position:absolute; z-index:60; min-width:190px; background:var(--ink-800);
+  border:1px solid var(--ink-600); border-radius:6px; box-shadow:0 10px 28px var(--shadow);
+  padding:5px; display:none; }
+.menu.open { display:block; }
+.menu button { display:block; width:100%; text-align:left; padding:6px 10px;
+  border-radius:4px; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.menu button:hover { background:var(--ink-700); }
+.menu .sep { border-top:1px solid var(--ink-700); margin:5px 0; }
+#recentmenu { max-width:440px; }
+#gitbadge { position:relative; }
+#gitbtn { display:flex; align-items:center; gap:7px; font-family:var(--mono); font-size:12px;
+  padding:3px 10px; border-radius:4px; border:1px solid transparent; color:var(--dim); }
+#gitbtn.hasrepo { border-color:var(--ink-600); background:var(--ink-800); color:var(--text); }
+#gitbtn:hover.hasrepo { border-color:var(--ink-500); }
+#gitbtn .dirty { color:var(--amber); }
+#gitbtn .sync { color:var(--faint); font-size:11px; }
+.actbtn { padding:4px 13px; border-radius:5px; border:1px solid var(--ink-600);
+  background:var(--ink-700); color:var(--text); font-size:12.5px; flex:none; }
+.actbtn:hover:not(:disabled) { border-color:var(--paper-dim); transform:translateY(-1px); }
+.actbtn:active:not(:disabled) { transform:translateY(0); }
+.actbtn:disabled { opacity:.35; cursor:default; }
+#compilebtn { border-color:transparent; background:var(--clay);
+  color:#fff; font-weight:600; box-shadow:0 1px 8px var(--glow); }
+#compilebtn:hover:not(:disabled) { border-color:transparent; filter:brightness(1.07); }
+#compilebtn:disabled { background:var(--ink-700); color:var(--text); box-shadow:none; }
+#pomo { position:relative; display:flex; align-items:center; }
+#pomo-toggle { font-family:var(--mono); font-size:12.5px; color:var(--text);
+  background:var(--ink-700); border:1px solid var(--ink-600); border-radius:5px 0 0 5px;
+  padding:3px 9px; display:flex; align-items:center; gap:5px; }
+#pomo-toggle.running { border-color:var(--clay); color:var(--clay); }
+#pomo-toggle.breakphase.running { border-color:var(--ok); color:var(--ok); }
+#pomo-gear { background:var(--ink-700); border:1px solid var(--ink-600); border-left:none;
+  border-radius:0 5px 5px 0; color:var(--dim); font-size:10px; padding:3px 6px; }
+#pomo-gear:hover { color:var(--text); }
+#pomo-menu { top:112%; right:0; left:auto; min-width:210px; }
+.pomo-phase { font-family:var(--sans); font-weight:600; letter-spacing:.012em;
+  color:var(--clay); padding:4px 10px 6px; font-size:13px; }
+.pomo-row { display:flex; align-items:center; justify-content:space-between; gap:10px;
+  padding:4px 10px; color:var(--dim); font-size:12px; }
+.pomo-row input { width:56px; background:var(--ink-700); border:1px solid var(--ink-600);
+  border-radius:4px; color:var(--text); font:12px var(--sans); padding:3px 6px; }
+#pomo-count { color:var(--text); font-family:var(--mono); }
+#pomo-reset { display:block; width:100%; text-align:left; padding:6px 10px; border-radius:4px; color:var(--text); }
+#pomo-reset:hover { background:var(--ink-700); }
+#syncbtn { font-family:var(--mono); font-size:11.5px; padding:3px 10px; }
+#syncbtn.pending { border-color:var(--amber); color:var(--amber); }
+#syncbtn.busy { opacity:.6; }
+#spacer { flex:1; }
+
+/* ---------- side pane ---------- */
+#sidebar-head { display:flex; align-items:center; padding:6px 8px 2px; gap:2px; }
+.side-tab { font-family:var(--sans); font-weight:600; letter-spacing:.012em;
+  font-size:12.5px; color:var(--faint); padding:3px 9px; border-radius:4px; }
+.side-tab.active { color:var(--text); background:var(--ink-700); }
+#sidebar-head .iconbtn { margin-left:auto; width:24px; height:22px; font-size:12px; }
+#treewrap, #searchwrap { flex:1; overflow:auto; padding:2px 0 24px; display:none; }
+#treewrap.show, #searchwrap.show { display:block; }
+.trow { display:flex; align-items:center; gap:5px; padding:2.5px 8px 2.5px 0; cursor:pointer;
+  white-space:nowrap; border-left:2px solid transparent; user-select:none;
+  transition:background .1s ease, border-color .1s ease; }
+.trow:hover { background:var(--ink-800); }
+.trow.active { background:var(--ink-700); border-left-color:var(--clay); }
+.trow .caret { width:14px; text-align:center; color:var(--faint); font-size:10px; flex:none; }
+.trow .icon { color:var(--faint); flex:none; width:15px; text-align:center; font-size:11px; }
+.trow .icon.tex { color:var(--amber); }
+.trow .icon.py { color:var(--ok); }
+.trow .icon.pdf { color:var(--clay); }
+.trow .icon.bib { color:var(--hl-num); }
+.trow .nm { overflow:hidden; text-overflow:ellipsis; }
+.trow .repochip { margin-left:auto; font-family:var(--mono); font-size:10px;
+  color:var(--faint); border:1px solid var(--ink-600); border-radius:3px; padding:0 4px; flex:none; }
+.tree-empty { color:var(--faint); padding:14px; }
+#searchwrap { padding:8px; }
+#searchbox { width:100%; background:var(--ink-700); border:1px solid var(--ink-600);
+  border-radius:4px; color:var(--text); font:12px var(--sans); padding:6px 9px; }
+#searchinfo { color:var(--faint); font-size:11px; padding:6px 2px; }
+.sr-file { font-family:var(--mono); font-size:11px; color:var(--clay); padding:8px 2px 2px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sr-hit { display:flex; gap:7px; padding:2px 4px; cursor:pointer; border-radius:3px;
+  font-family:var(--mono); font-size:11px; }
+.sr-hit:hover { background:var(--ink-700); }
+.sr-hit .ln { color:var(--faint); min-width:28px; text-align:right; flex:none; }
+.sr-hit .tx { color:var(--dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+/* ---------- editor ---------- */
+#tabstrip { display:flex; align-items:flex-end; background:var(--ink-850);
+  border-bottom:1px solid var(--ink-700); min-height:33px; overflow-x:auto; }
+.tab { display:flex; align-items:center; gap:7px; padding:7px 12px; font-size:12.5px;
+  color:var(--dim); border-right:1px solid var(--ink-700); cursor:pointer;
+  white-space:nowrap; border-top:2px solid transparent; user-select:none;
+  transition:background .12s ease, color .12s ease, border-color .12s ease; }
+.tab:hover { color:var(--text); background:color-mix(in srgb, var(--ink-800) 60%, transparent); }
+.tab.active { background:var(--ink-900); color:var(--text); border-top-color:var(--clay); }
+.tab .dot { color:var(--amber); display:none; }
+.tab.dirty .dot { display:inline; }
+.tab .x { color:var(--faint); padding:0 2px; border-radius:3px; }
+.tab .x:hover { color:var(--text); background:var(--ink-600); }
+#editwrap { flex:1; display:flex; min-height:0; position:relative; }
+#lines { width:48px; overflow:hidden; text-align:right; padding:8px 8px 8px 0;
+  font:var(--edsize)/1.55 var(--edfont); color:var(--faint); background:var(--ink-900);
+  border-right:1px solid var(--ink-800); user-select:none; white-space:pre; flex:none; }
+#edstack { position:relative; flex:1; min-width:0; }
+#hl, #editor { position:absolute; inset:0; font:var(--edsize)/1.55 var(--edfont);
+  padding:8px 12px; white-space:pre; tab-size:4; }
+#hl { overflow:hidden; pointer-events:none; color:var(--text); }
+#hl code { display:block; font:inherit; }
+#editor { background:transparent; color:transparent; caret-color:var(--text);
+  border:none; resize:none; overflow:auto; z-index:1; }
+#editor:focus-visible { outline:none; }
+.tk-kw { color:var(--hl-kw); } .tk-str { color:var(--hl-str); }
+.tk-cmt { color:var(--hl-cmt); font-style:italic; } .tk-num { color:var(--hl-num); }
+.tk-pun { color:var(--hl-pun); } .tk-dec { color:var(--hl-dec); }
+.tk-math { color:var(--hl-math); }
+.tk-sec { color:var(--hl-sec); font-weight:600; }
+.tk-env { color:var(--hl-env); }
+.tk-ref { color:var(--hl-ref); }
+.tk-fn { color:var(--hl-fn); }
+#pdfhost { position:absolute; inset:0; background:var(--ink-900); display:none; }
+#pdfhost iframe { width:100%; height:100%; border:none; }
+#imghost { position:absolute; inset:0; background:var(--ink-900); display:none;
+  align-items:center; justify-content:center; overflow:auto; padding:16px;
+  background-image:linear-gradient(45deg,var(--ink-850) 25%,transparent 25%,transparent 75%,var(--ink-850) 75%),
+    linear-gradient(45deg,var(--ink-850) 25%,transparent 25%,transparent 75%,var(--ink-850) 75%);
+  background-size:22px 22px; background-position:0 0,11px 11px; }
+#imghost img { max-width:100%; max-height:100%; object-fit:contain;
+  box-shadow:0 6px 30px var(--shadow); background:#fff; border-radius:2px; }
+#midempty { position:absolute; inset:0; display:flex; flex-direction:column; gap:8px;
+  align-items:center; justify-content:center; color:var(--faint); }
+#midempty .big { font-family:var(--sans); font-weight:600; letter-spacing:.01em;
+  font-size:19px; color:var(--dim); }
+#midempty kbd { background:var(--ink-700); border:1px solid var(--ink-600); border-radius:3px;
+  padding:1px 5px; font:11px var(--mono); }
+#statusline { display:flex; gap:16px; padding:3px 12px; font-family:var(--mono);
+  font-size:11px; color:var(--faint); border-top:1px solid var(--ink-800); }
+#st-file { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+#statusline .grow { flex:1; }
+
+/* ---------- right pane ---------- */
+#righttabs { display:flex; border-bottom:1px solid var(--ink-700); }
+.rtab { flex:1; text-align:center; padding:8px 0; font-family:var(--sans);
+  font-weight:600; letter-spacing:.012em; font-size:12.5px; color:var(--faint);
+  border-bottom:2px solid transparent; }
+.rtab.active { color:var(--text); border-bottom-color:var(--clay); }
+#preview { flex:1; display:none; flex-direction:column; min-height:0; min-width:0; padding:14px; }
+#preview.show { display:flex; }
+.paper-frame { flex:1; background:var(--frame); border-radius:4px; padding:7px;
+  box-shadow:0 6px 30px var(--shadow), inset 0 0 0 1px rgba(0,0,0,.18); min-height:0; }
+.paper-frame iframe { width:100%; height:100%; border:none; background:var(--paper); }
+.md-frame { flex:1; min-height:0; width:100%; border:none; border-radius:6px; background:var(--ink-850);
+  box-shadow:0 6px 30px var(--shadow), inset 0 0 0 1px var(--ink-700); }
+#preview-empty { flex:1; display:flex; flex-direction:column; gap:10px; align-items:center;
+  justify-content:center; color:var(--faint); text-align:center; padding:0 30px;
+  border:1px dashed var(--ink-600); border-radius:6px; }
+#preview-empty .pg { width:74px; height:96px; background:var(--paper); opacity:.18;
+  border-radius:2px; box-shadow:0 4px 14px var(--shadow); }
+
+/* ---------- claude ---------- */
+#claude { flex:1; display:none; flex-direction:column; min-height:0; }
+#claude.show { display:flex; }
+#aibar { display:flex; align-items:center; gap:8px; padding:8px 14px 6px;
+  border-bottom:1px solid var(--ink-700); }
+#ai-model { background:var(--ink-700); border:1px solid var(--ink-600); border-radius:5px;
+  color:var(--text); font:12px var(--sans); padding:4px 8px; max-width:60%; }
+#ai-cap { font-size:10.5px; color:var(--faint); font-family:var(--mono); }
+#chatlog { flex:1; overflow:auto; padding:12px 14px; display:flex; flex-direction:column; gap:10px; }
+.msg-user { align-self:flex-end; max-width:88%; background:var(--ink-700);
+  border:1px solid var(--ink-600); border-radius:8px 8px 2px 8px; padding:7px 11px;
+  white-space:pre-wrap; }
+.msg-claude { align-self:stretch; border-left:2px solid var(--clay); padding:2px 0 2px 11px;
+  overflow-wrap:anywhere; }
+.msg-claude p { margin:0 0 6px; white-space:pre-wrap; }
+.msg-claude p:last-child { margin-bottom:0; }
+.msg-claude code { background:var(--ink-700); border-radius:3px; padding:0 4px;
+  font:11.5px var(--mono); }
+.msg-claude pre { background:var(--ink-700); border:1px solid var(--ink-600); border-radius:5px;
+  padding:8px 10px; overflow-x:auto; font:11.5px/1.5 var(--mono); margin:4px 0 8px; white-space:pre; }
+.msg-claude pre code { background:none; padding:0; }
+.msg-tool { font-family:var(--mono); font-size:11px; color:var(--dim); padding:2px 0 2px 13px; }
+.msg-tool b { color:var(--clay); font-weight:600; }
+.msg-meta { font-family:var(--mono); font-size:10.5px; color:var(--faint); padding-left:13px; }
+.msg-err { color:var(--err); padding-left:13px; white-space:pre-wrap; }
+#chatempty { color:var(--faint); text-align:center; margin:auto; padding:0 34px; line-height:1.7; }
+#ctxline { font-family:var(--mono); font-size:10.5px; color:var(--faint);
+  padding:5px 14px; border-top:1px solid var(--ink-700); display:flex; gap:8px; align-items:center; }
+#ctxline .cx { color:var(--dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#newchat { margin-left:auto; color:var(--faint); font-size:10.5px; font-family:var(--mono); flex:none; }
+#newchat:hover { color:var(--text); }
+#chatform { display:flex; gap:8px; padding:10px 14px 12px; }
+#chatinput { flex:1; background:var(--ink-700); border:1px solid var(--ink-600);
+  border-radius:6px; color:var(--text); font:12.5px var(--sans); padding:8px 11px;
+  resize:none; max-height:120px; }
+#chatsend { background:var(--clay); color:#FFF6EE; border-radius:6px; padding:0 15px; font-weight:600; }
+html[data-theme="light"] #chatsend { color:#FFF9F4; }
+#chatsend:disabled { opacity:.4; }
+#chatsend.stop { background:var(--err); color:#fff; }
+
+/* ---------- dock ---------- */
+#dockbar { display:flex; align-items:center; gap:2px; padding:0 8px; height:29px; flex:none; }
+.dtab { font-family:var(--sans); font-weight:600; letter-spacing:.012em;
+  font-size:12.5px; color:var(--faint); padding:4px 12px; border-bottom:2px solid transparent; }
+.dtab.active { color:var(--text); border-bottom-color:var(--amber); }
+#extterm { margin-left:auto; color:var(--dim); font-family:var(--mono); font-size:11px;
+  border:1px solid var(--ink-600); border-radius:4px; padding:1px 9px; }
+#extterm:hover { color:var(--text); border-color:var(--ink-500); }
+#stopjob { color:var(--err); font-family:var(--mono); font-size:11.5px;
+  border:1px solid var(--err); border-radius:4px; padding:1px 9px; margin-left:8px; }
+#stopjob:hover { background:var(--err); color:#fff; }
+#dockbtn { color:var(--faint); font-family:var(--mono); margin-left:8px; }
+#dockbody { flex:1; display:flex; flex-direction:column; min-height:0; }
+.dockpane { flex:1; display:none; flex-direction:column; min-height:0; }
+.dockpane.show { display:flex; }
+.console { flex:1; overflow:auto; font:12px/1.5 var(--mono); padding:6px 12px;
+  white-space:pre-wrap; word-break:break-all; }
+.console .in { color:var(--paper-dim); }
+.console .err { color:var(--err); }
+.console .info { color:var(--amber); }
+#pane-term { background:var(--ink-900); }
+#xterm-host { display:none; flex:1; min-height:0; padding:4px 6px 4px 10px; overflow:hidden; }
+#xterm-host .xterm { height:100%; }
+#termout { padding-bottom:2px; }
+/* The prompt line sits flush against the output so typing continues the same
+   stream as a real console, same font, same background, bright caret. */
+#termform { display:flex; gap:7px; padding:1px 12px 8px; align-items:baseline;
+  background:var(--ink-900); }
+#termform .ps { font:12px/1.5 var(--mono); color:var(--ok); flex:none; }
+#terminput { flex:1; background:transparent; border:none; color:var(--text);
+  font:12px/1.5 var(--mono); padding:0; caret-color:var(--clay); }
+#terminput::placeholder { color:var(--faint); }
+
+/* ---------- modals ---------- */
+.overlay { position:fixed; inset:0; background:rgba(10,11,14,.6); z-index:90;
+  display:none; align-items:flex-start; justify-content:center; padding-top:9vh; }
+html[data-theme="light"] .overlay { background:rgba(70,60,40,.35); }
+.overlay.open { display:flex; }
+.dialog { background:var(--ink-800); border:1px solid var(--ink-600); border-radius:8px;
+  box-shadow:0 20px 60px var(--shadow); display:flex; flex-direction:column; max-height:76vh; }
+.dialog h2 { font-family:var(--sans); font-weight:600; letter-spacing:.012em;
+  font-size:16px; color:var(--text); font-weight:600; padding:14px 18px 6px; }
+.dialog footer { display:flex; gap:10px; padding:12px 18px 16px; justify-content:flex-end; }
+.btn-primary { background:var(--clay); color:#FFF6EE; border-radius:5px; padding:6px 16px; font-weight:600; }
+#picker { width:580px; }
+#pkpath { font-family:var(--mono); font-size:11.5px; color:var(--dim); padding:0 18px 8px; word-break:break-all; }
+#pkplaces, #pkdrives { display:flex; flex-wrap:wrap; gap:6px; padding:0 18px 8px; }
+#pkplaces button, #pkdrives button, #pkrecents button { font-family:var(--mono); font-size:11.5px;
+  border:1px solid var(--ink-600); border-radius:4px; padding:2px 8px; color:var(--dim);
+  max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#pkplaces button:hover, #pkdrives button:hover, #pkrecents button:hover { color:var(--text); border-color:var(--ink-500); }
+#pklist { flex:1; overflow:auto; border-top:1px solid var(--ink-700);
+  border-bottom:1px solid var(--ink-700); min-height:170px; }
+#pklist .prow { display:block; width:100%; text-align:left; padding:5px 18px; color:var(--text); }
+#pklist .prow:hover { background:var(--ink-700); }
+#pklist .up { color:var(--dim); }
+#pkrecents { padding:8px 18px 0; display:flex; flex-wrap:wrap; gap:6px; }
+#pkrecents span { color:var(--faint); font-size:11px; width:100%; }
+#settings { width:430px; }
+.set-row { display:flex; align-items:center; gap:12px; padding:7px 18px; }
+.set-row label { flex:1; color:var(--dim); }
+.set-row select, .set-row input[type=text], .set-row input[type=number] {
+  background:var(--ink-700); border:1px solid var(--ink-600); border-radius:4px;
+  color:var(--text); font:12px var(--sans); padding:5px 8px; }
+.set-row input[type=text] { width:215px; font-family:var(--mono); font-size:11px; }
+.set-row input[type=number] { width:60px; }
+.set-row select { min-width:170px; }
+.set-hint { font-size:11px; color:var(--faint); padding:0 18px 4px; }
+.swatches { display:flex; gap:9px; }
+.swatch { width:24px; height:24px; border-radius:50%; border:2px solid transparent;
+  cursor:pointer; transition:transform .12s ease, border-color .12s ease; }
+.swatch:hover { transform:scale(1.12); }
+.swatch.sel { border-color:var(--text); }
+.sw-clay{background:#D97757;} .sw-ocean{background:#5AA9C9;} .sw-forest{background:#7FB069;}
+.sw-violet{background:#A98BE0;} .sw-gold{background:#E0AC5A;}
+#prompt-dlg { width:380px; }
+#prompt-dlg input { margin:4px 18px 0; background:var(--ink-700); border:1px solid var(--ink-600);
+  border-radius:4px; color:var(--text); font:12.5px var(--sans); padding:7px 10px; }
+#confirm-dlg { width:380px; }
+#confirm-text { padding:4px 18px 0; color:var(--dim); line-height:1.6; }
+#qo-dlg { width:520px; }
+#qo-input { margin:4px 18px 8px; background:var(--ink-700); border:1px solid var(--ink-600);
+  border-radius:4px; color:var(--text); font:12.5px var(--mono); padding:7px 10px; }
+#qo-list { overflow:auto; max-height:46vh; border-top:1px solid var(--ink-700); padding:4px 0 8px; }
+#cite-dlg { width:600px; }
+#cite-input { margin:4px 18px 8px; background:var(--ink-700); border:1px solid var(--ink-600);
+  border-radius:5px; color:var(--text); font:12.5px var(--sans); padding:8px 11px; }
+#cite-results { max-height:34vh; overflow:auto; }
+.cite-row { padding:7px 18px; cursor:pointer; border-left:2px solid transparent; }
+.cite-row:hover, .cite-row.sel { background:var(--ink-700); border-left-color:var(--clay); }
+.cite-row .ct { color:var(--text); font-size:12.5px; }
+.cite-row .cm { color:var(--faint); font-size:11px; font-family:var(--mono); margin-top:2px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#cite-detail { display:none; border-top:1px solid var(--ink-700); padding:10px 18px 4px; }
+#cite-meta { color:var(--dim); font-size:12px; margin-bottom:8px; line-height:1.4; }
+#cite-meta b { color:var(--text); }
+.cite-bar { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+.cite-bar label { color:var(--faint); font-size:11.5px; }
+#cite-style { background:var(--ink-700); border:1px solid var(--ink-600); border-radius:4px;
+  color:var(--text); font:12px var(--sans); padding:4px 7px; }
+#cite-out { width:100%; height:120px; background:var(--ink-900); border:1px solid var(--ink-600);
+  border-radius:5px; color:var(--text); font:11.5px/1.5 var(--mono); padding:9px 11px; resize:vertical; }
+#cite-results .cite-empty { padding:14px 18px; color:var(--faint); }
+.find-bar { display:flex; align-items:center; gap:8px; padding:0 18px 8px; flex-wrap:wrap; }
+.find-bar label { color:var(--faint); font-size:11.5px; }
+.find-bar select { background:var(--ink-700); border:1px solid var(--ink-600); border-radius:4px;
+  color:var(--text); font:12px var(--sans); padding:4px 7px; }
+.cite-row .cbadges { display:flex; gap:6px; margin-top:3px; align-items:center; flex-wrap:wrap; }
+.cbadge { font-family:var(--mono); font-size:10px; padding:0 6px; border-radius:3px;
+  border:1px solid var(--ink-600); color:var(--dim); }
+.cbadge.type { color:var(--clay); border-color:var(--clay); }
+.cbadge.oa { color:var(--ok); border-color:var(--ok); }
+.cbadge.cited { color:var(--amber); border-color:var(--ink-600); }
+.cbadge.pub { color:var(--dim); border-color:var(--ink-500); }
+.cbadge.pub.major { color:#fff; background:var(--clay); border-color:var(--clay); font-weight:600; }
+.cite-row.major { border-left-color:var(--clay); background:color-mix(in srgb, var(--clay) 7%, transparent); }
+.cite-row.major:hover, .cite-row.major.sel { background:var(--ink-700); }
+#cite-abstract { color:var(--dim); font-size:11.5px; line-height:1.5; margin-bottom:8px;
+  max-height:88px; overflow:auto; padding-right:4px; }
+#cite-meta a { color:var(--clay); text-decoration:none; }
+#cite-meta a:hover { text-decoration:underline; }
+.qo-row { display:flex; gap:9px; padding:5px 18px; cursor:pointer; font-family:var(--mono);
+  font-size:12px; align-items:baseline; }
+.qo-row.sel, .qo-row:hover { background:var(--ink-700); }
+.qo-row .fn { color:var(--text); }
+.qo-row .fp { color:var(--faint); font-size:10.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+/* ---------- context menu / toasts ---------- */
+#ctxmenu { position:fixed; z-index:120; }
+#toasts { position:fixed; top:48px; right:14px; z-index:150; display:flex;
+  flex-direction:column; gap:8px; align-items:flex-end; }
+.toast { background:var(--ink-800); border:1px solid var(--ink-600); border-left:3px solid var(--ok);
+  border-radius:6px; padding:8px 14px; box-shadow:0 8px 24px var(--shadow); font-size:12.5px;
+  max-width:380px; }
+.toast.err { border-left-color:var(--err); }
+.toast.warn { border-left-color:var(--amber); }
+#ac-popup { position:fixed; z-index:200; background:var(--ink-800); border:1px solid var(--ink-600);
+  border-radius:6px; box-shadow:0 8px 24px var(--shadow); padding:3px; display:none;
+  max-height:246px; overflow:auto; min-width:150px; }
+#ac-popup.open { display:block; }
+.ac-row { padding:3px 11px; font:12px var(--mono); color:var(--text); border-radius:4px;
+  cursor:pointer; white-space:nowrap; }
+.ac-row.sel { background:var(--clay); color:#fff; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .menu.open, .dialog { animation:pop .12s ease-out; }
+  .toast { animation:pop .16s ease-out; }
+  @keyframes pop { from { opacity:0; transform:translateY(-3px); } }
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="topbar">
+    <div id="wordmark"><img id="brandlogo" src="/logo-64.png" alt="Beacon logo">Beacon</div>
+    <button class="iconbtn" id="backbtn" disabled title="Back to the previous workspace">←</button>
+    <div id="rootwrap">
+      <button id="rootbtn" title="Choose the workspace folder"><span id="rootlabel">Choose a folder…</span></button>
+      <button id="recentbtn" title="Recent workspaces">▾</button>
+      <div class="menu" id="recentmenu"></div>
+    </div>
+    <button class="iconbtn" id="revealbtn" title="Open the workspace folder in File Explorer">⊞</button>
+    <div id="gitbadge">
+      <button id="gitbtn" title="Git actions for the active file's repository">no repository</button>
+      <div class="menu" id="gitmenu" role="menu"></div>
+    </div>
+    <button class="actbtn" id="syncbtn" title="Publish: commit, pull, then push. Asks Overleaf (documents) or GitHub (code) when the folder has both (Ctrl+Shift+S)" style="display:none">⟲ Sync</button>
+    <div id="spacer"></div>
+    <div id="pomo">
+      <button id="pomo-toggle" title="Pomodoro focus timer — click to start or pause">🍅 <span id="pomo-time">25:00</span></button>
+      <button id="pomo-gear" title="Timer settings">▾</button>
+      <div class="menu" id="pomo-menu">
+        <div class="pomo-phase" id="pomo-phase">Focus</div>
+        <div class="pomo-row"><label>Focus minutes</label><input type="number" id="pomo-focus" min="1" max="120" value="25"></div>
+        <div class="pomo-row"><label>Break minutes</label><input type="number" id="pomo-break" min="1" max="60" value="5"></div>
+        <div class="pomo-row"><label>Completed focus sessions</label><span id="pomo-count">0</span></div>
+        <div class="sep"></div>
+        <button id="pomo-reset">Reset timer</button>
+      </div>
+    </div>
+    <button class="actbtn" id="installbtn" title="Install as a desktop app so it gets its own taskbar icon" style="display:none">⤓ Install app</button>
+    <button class="actbtn" id="citebtn" title="Find papers, books, and citations (Ctrl+Shift+K)">🔍 Find research</button>
+    <div id="toolsbadge" style="position:relative">
+      <button class="actbtn" id="toolsbtn" title="Tools">Tools ▾</button>
+      <div class="menu" id="toolsmenu" role="menu"></div>
+    </div>
+    <button class="iconbtn" id="themebtn" title="Switch between dark and light theme">◐</button>
+    <button class="iconbtn" id="setbtn" title="Settings">⚙</button>
+    <button class="actbtn" id="runbtn" disabled title="Run the active Python file with the configured interpreter">Run</button>
+    <button class="actbtn" id="compilebtn" disabled title="Compile the active .tex file (Ctrl+B)">Compile</button>
+  </div>
+
+  <div id="side">
+    <div id="sidebar-head">
+      <button class="side-tab active" id="filestab">Files</button>
+      <button class="side-tab" id="searchtab">Search</button>
+      <button class="iconbtn" id="newfilebtn" title="New file in the workspace root">+</button>
+      <button class="iconbtn" id="refreshbtn" title="Refresh the file tree">⟳</button>
+    </div>
+    <div id="treewrap" class="show"><div id="treebody"><div class="tree-empty">Choose a folder to open.</div></div></div>
+    <div id="searchwrap">
+      <input id="searchbox" placeholder="Search in files… (Enter)" autocomplete="off">
+      <div id="searchinfo"></div>
+      <div id="searchresults"></div>
+    </div>
+  </div>
+  <div id="gl"></div>
+
+  <div id="mid">
+    <div id="tabstrip"></div>
+    <div id="editwrap">
+      <div id="lines">1</div>
+      <div id="edstack">
+        <pre id="hl"><code></code></pre>
+        <textarea id="editor" spellcheck="false" wrap="off" aria-label="Editor"></textarea>
+      </div>
+      <div id="pdfhost"></div>
+      <div id="imghost"></div>
+      <div id="midempty">
+        <div class="big">Nothing open</div>
+        <div>Pick a file from the tree, or press <kbd>Ctrl+P</kbd> to open by name.</div>
+        <div>PDFs and images open here; .tex and .md render on the right.</div>
+      </div>
+    </div>
+    <div id="statusline"><span id="st-file">–</span><span class="grow"></span><span id="st-words"></span><span id="st-pos"></span><span id="st-save"></span></div>
+  </div>
+  <div id="gr"></div>
+
+  <div id="right">
+    <div id="righttabs">
+      <button class="rtab active" data-r="preview">Preview</button>
+      <button class="rtab" data-r="claude">Get help with AI</button>
+    </div>
+    <div id="preview" class="show">
+      <div id="preview-empty"><div class="pg"></div><div>Compile a .tex file and the typeset page appears here.</div></div>
+    </div>
+    <div id="claude">
+      <div id="aibar">
+        <select id="ai-model" title="Choose the AI model"></select>
+        <span id="ai-cap"></span>
+      </div>
+      <div id="chatlog"><div id="chatempty">Ask about the open file, the paper you are reading, or the manuscript. Choose a model above. Claude models can edit files in this workspace; other models answer as chat.</div></div>
+      <div id="ctxline"><span>sees:</span><span class="cx" id="ctxfile">–</span><button id="newchat" title="Start a fresh conversation">new chat</button></div>
+      <form id="chatform">
+        <textarea id="chatinput" rows="2" placeholder="Ask the AI… (Ctrl+Enter to send)"></textarea>
+        <button id="chatsend" type="submit">Send</button>
+      </form>
+    </div>
+  </div>
+
+  <div id="dock">
+    <div id="dockgrip"></div>
+    <div id="dockbar">
+      <button class="dtab active" data-d="term">Terminal</button>
+      <button class="dtab" data-d="out">Output</button>
+      <button id="extterm" title="Open a real external terminal here (for interactive tools like claude, which the embedded terminal cannot run)">⤢ Real terminal</button>
+      <button id="stopjob" title="Stop the running task" style="display:none">■ Stop</button>
+      <button id="dockbtn" title="Toggle the panel (Ctrl+`)">▾</button>
+    </div>
+    <div id="dockbody">
+      <div class="dockpane show" id="pane-term">
+        <div id="xterm-host"></div>
+        <div class="console" id="termout"></div>
+        <form id="termform"><span class="ps">❯</span><input id="terminput" autocomplete="off" aria-label="Terminal input" placeholder="PowerShell command… (venv python on PATH)"></form>
+      </div>
+      <div class="dockpane" id="pane-out">
+        <div class="console" id="jobout">Compile, run, and git output lands here.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="picker-ov">
+  <div class="dialog" id="picker" role="dialog" aria-label="Choose workspace folder">
+    <h2>Open Workspace</h2>
+    <div id="pkpath"></div>
+    <div id="pkplaces"></div>
+    <div id="pkdrives"></div>
+    <div id="pklist"></div>
+    <div id="pkrecents"></div>
+    <footer>
+      <button class="actbtn" id="pkexplorer" title="Pick a folder with the Windows dialog">⊞ Browse in Explorer…</button>
+      <div style="flex:1"></div>
+      <button class="actbtn" id="pkcancel">Cancel</button>
+      <button class="btn-primary" id="pkopen">Open this folder</button>
+    </footer>
+  </div>
+</div>
+
+<div class="overlay" id="settings-ov">
+  <div class="dialog" id="settings" role="dialog" aria-label="Settings">
+    <h2>Settings</h2>
+    <div class="set-row"><label for="set-theme">Theme</label>
+      <select id="set-theme"><option value="dark">Dark</option><option value="light">Light</option></select></div>
+    <div class="set-row"><label>Accent</label>
+      <div id="set-accent" class="swatches"></div></div>
+    <div class="set-row"><label for="set-edfont">Editor font</label>
+      <select id="set-edfont">
+        <option>Cascadia Mono</option><option>Cascadia Code</option>
+        <option>Consolas</option><option>JetBrains Mono</option>
+        <option>Fira Code</option><option>Courier New</option>
+      </select></div>
+    <div class="set-row"><label for="set-compiler">LaTeX compiler</label>
+      <select id="set-compiler">
+        <option value="latexmk">pdfLaTeX · latexmk full build</option>
+        <option value="pdflatex">pdfLaTeX · single quick pass</option>
+        <option value="xelatex">XeLaTeX · latexmk</option>
+        <option value="lualatex">LuaLaTeX · latexmk</option>
+      </select></div>
+    <div class="set-row"><label for="set-python">Python interpreter</label>
+      <input type="text" id="set-python" spellcheck="false"></div>
+    <div class="set-hint">Used by the Run button and put first on PATH for the terminal.</div>
+    <div class="set-row"><label for="set-font">Editor font size</label>
+      <input type="number" id="set-font" min="9" max="22"></div>
+    <div class="set-row"><label for="set-autoinstall">Auto-install missing LaTeX packages</label>
+      <input type="checkbox" id="set-autoinstall"></div>
+    <div class="set-row"><label for="set-autosave">Auto-save modified files every 30 s</label>
+      <input type="checkbox" id="set-autosave"></div>
+    <div class="set-hint" style="padding-top:8px;border-top:1px solid var(--ink-700);margin-top:6px">AI model keys (optional). Claude works without a key through the Claude Code CLI. Add a key to use ChatGPT, Gemini, or Grok.</div>
+    <div class="set-row"><label for="set-openai">OpenAI (ChatGPT) key</label>
+      <input type="password" id="set-openai" spellcheck="false" autocomplete="off"></div>
+    <div class="set-row"><label for="set-gemini">Google Gemini key</label>
+      <input type="password" id="set-gemini" spellcheck="false" autocomplete="off"></div>
+    <div class="set-row"><label for="set-xai">xAI (Grok) key</label>
+      <input type="password" id="set-xai" spellcheck="false" autocomplete="off"></div>
+    <div class="set-hint" style="padding-top:8px;border-top:1px solid var(--ink-700);margin-top:6px">Beacon updates. Pull the latest version from the project's GitHub repository.</div>
+    <div class="set-row"><label>Software updates</label>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="actbtn" id="upd-check">Check for updates</button>
+        <button class="btn-primary" id="upd-apply" style="display:none">Update now</button>
+        <span id="upd-status" class="set-hint" style="margin:0"></span>
+      </div></div>
+    <footer>
+      <button class="actbtn" id="set-cancel">Cancel</button>
+      <button class="btn-primary" id="set-save">Save settings</button>
+    </footer>
+  </div>
+</div>
+
+<div class="overlay" id="prompt-ov">
+  <div class="dialog" id="prompt-dlg" role="dialog">
+    <h2 id="prompt-title">Name</h2>
+    <input id="prompt-input" autocomplete="off" spellcheck="false">
+    <footer>
+      <button class="actbtn" id="prompt-cancel">Cancel</button>
+      <button class="btn-primary" id="prompt-ok">OK</button>
+    </footer>
+  </div>
+</div>
+
+<div class="overlay" id="connect-ov">
+  <div class="dialog" id="connect-dlg" role="dialog" aria-label="Connect a git remote">
+    <h2>Connect this folder to a remote</h2>
+    <div class="set-hint">Overleaf for a LaTeX/document folder, GitHub for a code folder. A folder can have both. The token is stored only in this repo's local git config and is never committed.</div>
+    <div class="set-row"><label for="connect-provider">Service</label>
+      <select id="connect-provider">
+        <option value="overleaf">Overleaf (LaTeX / documents)</option>
+        <option value="github">GitHub (code / computational work)</option>
+      </select></div>
+    <div class="set-row"><label for="connect-url" id="connect-url-label">Overleaf git URL</label>
+      <input type="text" id="connect-url" spellcheck="false" autocomplete="off"></div>
+    <div class="set-row"><label for="connect-token">Git token</label>
+      <input type="password" id="connect-token" spellcheck="false" autocomplete="off"></div>
+    <div class="set-hint" id="connect-help"></div>
+    <footer>
+      <button class="actbtn" id="connect-cancel">Cancel</button>
+      <button class="btn-primary" id="connect-ok">Connect</button>
+    </footer>
+  </div>
+</div>
+
+<div class="overlay" id="confirm-ov">
+  <div class="dialog" id="confirm-dlg" role="dialog">
+    <h2 id="confirm-title">Confirm</h2>
+    <div id="confirm-text"></div>
+    <footer>
+      <button class="actbtn" id="confirm-cancel">Cancel</button>
+      <button class="btn-primary" id="confirm-ok">Confirm</button>
+    </footer>
+  </div>
+</div>
+
+<div class="overlay" id="qo-ov">
+  <div class="dialog" id="qo-dlg" role="dialog" aria-label="Quick open">
+    <h2>Quick Open</h2>
+    <input id="qo-input" placeholder="Type a file name…" autocomplete="off" spellcheck="false">
+    <div id="qo-list"></div>
+  </div>
+</div>
+
+<div class="overlay" id="cite-ov">
+  <div class="dialog" id="cite-dlg" role="dialog" aria-label="Research finder">
+    <h2>Research Finder</h2>
+    <input id="cite-input" placeholder="Search papers, books, and preprints by keyword, author, title, or DOI…  (Enter)" autocomplete="off" spellcheck="false">
+    <div class="find-bar">
+      <label for="find-source">Source</label>
+      <select id="find-source">
+        <option value="openalex">OpenAlex (papers + books)</option>
+        <option value="crossref">Crossref (DOIs)</option>
+      </select>
+      <label for="find-type">Type</label>
+      <select id="find-type">
+        <option value="all">Everything</option>
+        <option value="article">Articles</option>
+        <option value="book">Books</option>
+        <option value="preprint">Preprints</option>
+      </select>
+      <label for="find-focus">Focus</label>
+      <select id="find-focus">
+        <option value="">All venues (IEEE/Elsevier first)</option>
+        <option value="ee">Power &amp; EE only (IEEE, Elsevier, IET)</option>
+      </select>
+    </div>
+    <div id="cite-results"></div>
+    <div id="cite-detail">
+      <div id="cite-meta"></div>
+      <div id="cite-abstract"></div>
+      <div class="cite-bar">
+        <label for="cite-style">Cite as</label>
+        <select id="cite-style"></select>
+        <div style="flex:1"></div>
+        <button class="actbtn" id="cite-copy">Copy</button>
+        <button class="actbtn" id="cite-append">＋ references.bib</button>
+        <button class="actbtn" id="cite-open">Open paper ↗</button>
+      </div>
+      <textarea id="cite-out" readonly spellcheck="false"></textarea>
+    </div>
+    <footer><button class="actbtn" id="cite-close">Close</button></footer>
+  </div>
+</div>
+
+<div class="menu" id="ctxmenu"></div>
+<div id="toasts"></div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const WB_TOKEN = "__WB_TOKEN__";
+function withTok(url) { return url + (url.includes("?") ? "&" : "?") + "tok=" + WB_TOKEN; }
+function sse(url) { return new EventSource(withTok(url)); }
+const api = {
+  get: async (url) => {
+    const r = await fetch(withTok(url), {headers:{"X-WB-Token":WB_TOKEN}});
+    return r.json();
+  },
+  post: async (url, body) => {
+    const r = await fetch(url, {method:"POST",
+      headers:{"Content-Type":"application/json", "X-WB-Token":WB_TOKEN},
+      body:JSON.stringify(body||{})});
+    return r.json();
+  },
+};
+const state = {
+  root:"", tabs:[], active:-1, lastPdf:null, gitInfo:null,
+  termES:null, chatBusy:false, recents:[], settings:{},
+  expanded:new Set(), rootHistory:[], qoIndex:null, qoSel:0, autosaveTimer:null,
+};
+
+/* ================= helpers ================= */
+function esc(s) {
+  return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+function toast(text, kind, ms) {
+  const t = document.createElement("div");
+  t.className = "toast" + (kind ? " " + kind : "");
+  t.textContent = text;
+  $("toasts").appendChild(t);
+  setTimeout(() => t.remove(), ms || 3200);
+}
+function openMenuAt(menu, x, y) {
+  menu.classList.add("open");
+  menu.style.left = Math.min(x, innerWidth - menu.offsetWidth - 8) + "px";
+  menu.style.top = Math.min(y, innerHeight - menu.offsetHeight - 8) + "px";
+}
+function closeMenus() {
+  document.querySelectorAll(".menu.open").forEach(m => m.classList.remove("open"));
+}
+document.addEventListener("click", ev => {
+  if (!ev.target.closest(".menu") && !ev.target.closest("#gitbtn")
+      && !ev.target.closest("#recentbtn")) closeMenus();
+});
+
+/* prompt + confirm dialogs */
+let promptCb = null, confirmCb = null, confirmCancelCb = null;
+function promptModal(title, initial, cb) {
+  promptCb = cb;
+  $("prompt-title").textContent = title;
+  $("prompt-input").value = initial || "";
+  $("prompt-ov").classList.add("open");
+  setTimeout(() => { $("prompt-input").focus(); $("prompt-input").select(); }, 30);
+}
+$("prompt-ok").addEventListener("click", () => {
+  const v = $("prompt-input").value.trim();
+  $("prompt-ov").classList.remove("open");
+  if (promptCb && v) promptCb(v);
+});
+$("prompt-cancel").addEventListener("click", () => $("prompt-ov").classList.remove("open"));
+$("prompt-input").addEventListener("keydown", ev => {
+  if (ev.key === "Enter") { ev.preventDefault(); $("prompt-ok").click(); }
+});
+function confirmModal(title, text, cb, cancelCb) {
+  confirmCb = cb; confirmCancelCb = cancelCb || null;
+  $("confirm-title").textContent = title;
+  $("confirm-text").textContent = text;
+  $("confirm-ov").classList.add("open");
+}
+$("confirm-ok").addEventListener("click", () => {
+  $("confirm-ov").classList.remove("open");
+  const cb = confirmCb; confirmCb = confirmCancelCb = null;
+  if (cb) cb();
+});
+function cancelConfirm() {
+  if (!$("confirm-ov").classList.contains("open")) return;
+  $("confirm-ov").classList.remove("open");
+  const cb = confirmCancelCb; confirmCb = confirmCancelCb = null;
+  if (cb) cb();
+}
+$("confirm-cancel").addEventListener("click", cancelConfirm);
+
+/* ================= theme + settings ================= */
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme === "light" ? "light" : "dark";
+  localStorage.setItem("wb-theme", theme);
+  if (typeof xterm !== "undefined" && xterm) xterm.options.theme = xtermTheme();
+  if (document.getElementById("md-frame")) renderMarkdownPreview();
+}
+applyTheme(localStorage.getItem("wb-theme") || "dark");
+function applyAccent(a) {
+  document.documentElement.dataset.accent = a || "clay";
+  localStorage.setItem("wb-accent", a || "clay");
+}
+applyAccent(localStorage.getItem("wb-accent") || "clay");
+function applySettings(s) {
+  state.settings = s;
+  applyTheme(s.theme);
+  applyAccent(s.accent);
+  document.documentElement.style.setProperty("--edsize", (s.font_size || 12) + "px");
+  document.documentElement.style.setProperty("--edfont",
+    '"' + (s.editor_font || "Cascadia Mono") + '","Cascadia Mono",Consolas,monospace');
+  if (state.autosaveTimer) { clearInterval(state.autosaveTimer); state.autosaveTimer = null; }
+  if (s.autosave) {
+    state.autosaveTimer = setInterval(() => {
+      const t = state.tabs[state.active];
+      if (t && t.kind === "text" && t.dirty) saveActive();
+    }, 30000);
+  }
+}
+$("themebtn").addEventListener("click", async () => {
+  const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  applyTheme(next);
+  const r = await api.post("/api/settings", {theme: next});
+  if (r.settings) state.settings = r.settings;
+});
+const ACCENTS = ["clay", "ocean", "forest", "violet", "gold"];
+let pendingAccent = "clay";
+function buildSwatches(selected) {
+  pendingAccent = selected;
+  const host = $("set-accent");
+  host.innerHTML = "";
+  for (const a of ACCENTS) {
+    const b = document.createElement("button");
+    b.className = "swatch sw-" + a + (a === selected ? " sel" : "");
+    b.title = a[0].toUpperCase() + a.slice(1);
+    b.addEventListener("click", () => {
+      pendingAccent = a;
+      applyAccent(a);   // live preview
+      host.querySelectorAll(".swatch").forEach(s => s.classList.remove("sel"));
+      b.classList.add("sel");
+    });
+    host.appendChild(b);
+  }
+}
+$("setbtn").addEventListener("click", () => {
+  const s = state.settings;
+  $("set-theme").value = s.theme || "dark";
+  buildSwatches(s.accent || "clay");
+  $("set-edfont").value = s.editor_font || "Cascadia Mono";
+  $("set-compiler").value = s.compiler || "latexmk";
+  $("set-python").value = s.python_path || "";
+  $("set-font").value = s.font_size || 12;
+  $("set-autosave").checked = !!s.autosave;
+  $("set-autoinstall").checked = s.auto_install !== false;
+  const ks = (s.keys_set) || {};
+  $("set-openai").value = ""; $("set-openai").placeholder = ks.openai ? "•••••• key saved" : "sk-…";
+  $("set-gemini").value = ""; $("set-gemini").placeholder = ks.gemini ? "•••••• key saved" : "AIza…";
+  $("set-xai").value = ""; $("set-xai").placeholder = ks.xai ? "•••••• key saved" : "xai-…";
+  $("settings-ov").classList.add("open");
+});
+$("set-cancel").addEventListener("click", () => {
+  applyAccent(state.settings.accent || "clay");   // revert live preview
+  $("settings-ov").classList.remove("open");
+});
+$("set-save").addEventListener("click", async () => {
+  const r = await api.post("/api/settings", {
+    theme: $("set-theme").value,
+    accent: pendingAccent,
+    editor_font: $("set-edfont").value,
+    compiler: $("set-compiler").value,
+    python_path: $("set-python").value.trim(),
+    font_size: parseInt($("set-font").value, 10) || 12,
+    autosave: $("set-autosave").checked,
+    auto_install: $("set-autoinstall").checked,
+    openai_key: $("set-openai").value,
+    gemini_key: $("set-gemini").value,
+    xai_key: $("set-xai").value,
+  });
+  if (r.settings) state.settings = r.settings;
+  initAiModels(true);
+  $("settings-ov").classList.remove("open");
+  if (r.settings) { applySettings(r.settings); toast("Settings saved"); }
+  else toast(r.error || "Could not save settings", "err");
+});
+// Self-update: Beacon's own folder is a clone of its GitHub repo, so an
+// installed copy can check for and pull updates from inside the app.
+$("upd-check").addEventListener("click", async () => {
+  const status = $("upd-status"), apply = $("upd-apply");
+  status.textContent = "Checking…"; apply.style.display = "none";
+  const r = await api.post("/api/app/update", {action: "check"});
+  if (r.error) { status.textContent = r.error; return; }
+  if (r.behind > 0) {
+    status.textContent = r.behind + " update" + (r.behind > 1 ? "s" : "") + " available (on " + r.branch + ").";
+    apply.style.display = "";
+  } else if (r.ahead > 0) {
+    status.textContent = "This is a development copy with " + r.ahead + " local commit" + (r.ahead > 1 ? "s" : "") + "; nothing to pull.";
+  } else {
+    status.textContent = "Beacon is up to date (" + r.current + ").";
+  }
+});
+$("upd-apply").addEventListener("click", async () => {
+  const status = $("upd-status"), apply = $("upd-apply");
+  apply.disabled = true; status.textContent = "Updating…";
+  const r = await api.post("/api/app/update", {action: "update"});
+  apply.disabled = false;
+  if (r.error) { status.textContent = r.error; return; }
+  if (r.updated) {
+    apply.style.display = "none";
+    status.textContent = "Updated " + r.from + " → " + r.to + ". Restart Beacon to apply.";
+    toast("Beacon updated. Restart to apply the new version.", "", 8000);
+  } else {
+    status.textContent = r.message || "Already up to date.";
+    apply.style.display = "none";
+  }
+});
+
+/* ================= boot + workspace ================= */
+async function boot() {
+  const cfg = await api.get("/api/config");
+  state.recents = cfg.recents || [];
+  state.hasPty = !!cfg.pty && typeof Terminal !== "undefined";
+  applySettings(cfg.settings || {});
+  initAiModels();
+  if (cfg.root) {
+    await setRoot(cfg.root, false);
+    for (const p of cfg.open_tabs || []) await openFile(p, true);
+    if (state.tabs.length) activate(state.tabs.length - 1);
+  } else {
+    openPicker();
+  }
+}
+function dirtyTabs() {
+  return state.tabs.filter(t => t.kind === "text" && t.dirty);
+}
+async function setRoot(root, push) {
+  const dirty = dirtyTabs();
+  if (dirty.length) {
+    const ok = await new Promise(res =>
+      confirmModal("Unsaved changes",
+        dirty.length + " file(s) have unsaved edits that switching workspace will discard. Continue?",
+        () => res(true), () => res(false)));
+    if (!ok) return;
+  }
+  for (const p in pdfFrames) dropPdfFrame(p);
+  if (push && state.root && state.root !== root) {
+    state.rootHistory.push(state.root);
+    $("backbtn").disabled = false;
+  }
+  state.root = root;
+  $("rootlabel").textContent = root;
+  state.tabs = []; state.active = -1; state.lastPdf = null;
+  state.expanded = new Set(); state.qoIndex = null;
+  renderTabs(); showPane(); persistTabs();
+  await loadTree();
+  restartTerminal(true);
+  updateGit(root);
+}
+$("backbtn").addEventListener("click", async () => {
+  const prev = state.rootHistory.pop();
+  $("backbtn").disabled = !state.rootHistory.length;
+  if (!prev) return;
+  const r = await api.post("/api/root", {path: prev});
+  if (r.ok) setRoot(r.root, false);
+});
+$("recentbtn").addEventListener("click", ev => {
+  ev.stopPropagation();
+  const m = $("recentmenu");
+  m.innerHTML = "";
+  if (!state.recents.length) m.innerHTML = '<button disabled>No recent workspaces</button>';
+  for (const rpath of state.recents) {
+    const b = document.createElement("button");
+    b.textContent = rpath;
+    b.addEventListener("click", async () => {
+      closeMenus();
+      const r = await api.post("/api/root", {path: rpath});
+      if (r.ok) { setRoot(r.root, true); refreshRecents(); }
+      else toast(r.error || "Folder is gone", "err");
+    });
+    m.appendChild(b);
+  }
+  const rect = $("recentbtn").getBoundingClientRect();
+  openMenuAt(m, rect.left, rect.bottom + 4);
+});
+async function refreshRecents() {
+  const cfg = await api.get("/api/config");
+  state.recents = cfg.recents || [];
+}
+$("rootbtn").addEventListener("click", () => openPicker());
+
+/* ================= tree ================= */
+async function loadTree() {
+  const body = $("treebody");
+  body.innerHTML = "";
+  await renderDir(state.root, body, 0);
+  if (!body.children.length)
+    body.innerHTML = '<div class="tree-empty">This folder is empty.</div>';
+  markActiveRow();
+}
+function iconFor(ext) {
+  if (ext === ".tex" || ext === ".cls" || ext === ".sty") return ["▢", "tex"];
+  if (ext === ".py") return ["▢", "py"];
+  if (ext === ".pdf") return ["▣", "pdf"];
+  if (ext === ".bib") return ["▢", "bib"];
+  if (ext === ".md") return ["▢", "bib"];
+  if ([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".tif", ".tiff"].includes(ext)) return ["▨", "pdf"];
+  return ["▢", ""];
+}
+async function renderDir(path, container, depth) {
+  const data = await api.get("/api/tree?path=" + encodeURIComponent(path));
+  if (data.error) { container.innerHTML = '<div class="tree-empty">' + esc(data.error) + '</div>'; return; }
+  for (const e of data.entries) {
+    const row = document.createElement("div");
+    row.className = "trow";
+    row.style.paddingLeft = (8 + depth * 14) + "px";
+    row.tabIndex = 0;
+    const full = path.replace(/\\$/, "") + "\\" + e.name;
+    if (e.dir) {
+      row.innerHTML = '<span class="caret">▸</span><span class="icon">▤</span>' +
+        '<span class="nm"></span>' + (e.repo ? '<span class="repochip">⎇</span>' : "");
+      row.querySelector(".nm").textContent = e.name;
+      row.dataset.path = full; row.dataset.dir = "1";
+      const kids = document.createElement("div");
+      kids.style.display = "none";
+      let loaded = false;
+      const setOpen = async (open) => {
+        kids.style.display = open ? "block" : "none";
+        row.querySelector(".caret").textContent = open ? "▾" : "▸";
+        if (open) state.expanded.add(full); else state.expanded.delete(full);
+        if (open && !loaded) { loaded = true; await renderDir(full, kids, depth + 1); }
+      };
+      row.addEventListener("click", () => setOpen(kids.style.display === "none"));
+      row.addEventListener("keydown", ev => { if (ev.key === "Enter") setOpen(kids.style.display === "none"); });
+      container.appendChild(row); container.appendChild(kids);
+      if (state.expanded.has(full)) setOpen(true);
+    } else {
+      const [glyph, cls] = iconFor(e.ext);
+      row.innerHTML = '<span class="caret"></span><span class="icon ' + cls + '">' + glyph + '</span><span class="nm"></span>';
+      row.querySelector(".nm").textContent = e.name;
+      row.dataset.path = full;
+      const open = () => openFile(full);
+      row.addEventListener("click", open);
+      row.addEventListener("keydown", ev => { if (ev.key === "Enter") open(); });
+      container.appendChild(row);
+    }
+  }
+}
+function markActiveRow() {
+  const cur = state.tabs[state.active];
+  document.querySelectorAll(".trow").forEach(r => {
+    r.classList.toggle("active", !!cur && r.dataset.path === cur.path && !r.dataset.dir);
+  });
+}
+$("refreshbtn").addEventListener("click", () => { loadTree(); toast("Tree refreshed"); });
+$("newfilebtn").addEventListener("click", () => {
+  if (!state.root) return;
+  promptModal("New file in workspace root", "untitled.tex", name => fileOp("new_file", state.root, name, true));
+});
+
+/* tree context menu */
+$("treebody").addEventListener("contextmenu", ev => {
+  ev.preventDefault();
+  const row = ev.target.closest(".trow");
+  const m = $("ctxmenu");
+  m.innerHTML = "";
+  const add = (label, fn) => {
+    const b = document.createElement("button");
+    b.textContent = label;
+    b.addEventListener("click", () => { closeMenus(); fn(); });
+    m.appendChild(b);
+  };
+  const targetPath = row ? row.dataset.path : state.root;
+  const isDir = row ? !!row.dataset.dir : true;
+  const dirForNew = isDir ? targetPath : targetPath.slice(0, targetPath.lastIndexOf("\\"));
+  add("New file…", () => promptModal("New file", "untitled.tex", n => fileOp("new_file", dirForNew, n, true)));
+  add("New folder…", () => promptModal("New folder", "folder", n => fileOp("new_folder", dirForNew, n)));
+  if (row) {
+    const base = targetPath.split("\\").pop();
+    m.insertAdjacentHTML("beforeend", '<div class="sep"></div>');
+    add("Rename…", () => promptModal("Rename " + base, base, n => fileOp("rename", targetPath, n)));
+    add("Delete", () => confirmModal("Delete " + base,
+      "Delete " + targetPath + "? This cannot be undone.",
+      () => fileOp("delete", targetPath)));
+    m.insertAdjacentHTML("beforeend", '<div class="sep"></div>');
+    add("Copy path", () => { navigator.clipboard.writeText(targetPath); toast("Path copied"); });
+    add("Reveal in Explorer", () => api.post("/api/reveal", {path: targetPath}));
+  }
+  openMenuAt(m, ev.clientX, ev.clientY);
+});
+async function fileOp(op, path, name, openAfter) {
+  // Warn before an op that would discard unsaved edits in an open tab.
+  if (op === "rename" || op === "delete") {
+    const dirtyOpen = state.tabs.find(t => t.kind === "text" && t.dirty &&
+      (t.path === path || t.path.startsWith(path + "\\")));
+    if (dirtyOpen) {
+      return new Promise(res => confirmModal("Unsaved changes",
+        dirtyOpen.name + " has unsaved edits that will be lost. Continue?",
+        () => res(fileOpConfirmed(op, path, name, openAfter))));
+    }
+  }
+  return fileOpConfirmed(op, path, name, openAfter);
+}
+async function fileOpConfirmed(op, path, name, openAfter) {
+  syncActive();
+  const r = await api.post("/api/fileop", {op, path, name});
+  if (r.error) { toast(r.error, "err"); return; }
+  if (op === "rename" || op === "delete") {
+    const affected = state.tabs.filter(t => t.path === path || t.path.startsWith(path + "\\"));
+    for (const t of affected) {
+      const i = state.tabs.indexOf(t);
+      if (i >= 0) {
+        if (t.kind === "pdf") dropPdfFrame(t.path);
+        state.tabs.splice(i, 1);
+        if (i < state.active) state.active -= 1;
+        if (state.active >= state.tabs.length) state.active = state.tabs.length - 1;
+      }
+    }
+    renderTabs(); showPane(); markActiveRow(); updateActions(); updateCtxLine(); persistTabs();
+  }
+  await loadTree();
+  state.qoIndex = null;
+  if (openAfter && r.path) openFile(r.path);
+  toast({new_file:"File created", new_folder:"Folder created", rename:"Renamed", delete:"Deleted"}[op] || "Done");
+}
+
+/* ================= tabs / editor ================= */
+function langFor(path) {
+  const ext = path.slice(path.lastIndexOf(".")).toLowerCase();
+  if (ext === ".tex" || ext === ".cls" || ext === ".sty") return "latex";
+  if (ext === ".py") return "python";
+  if (ext === ".bib") return "bibtex";
+  if (ext === ".md") return "markdown";
+  if (ext === ".json") return "json";
+  return "plain";
+}
+async function openFile(path, silent) {
+  const i = state.tabs.findIndex(t => t.path === path);
+  if (i >= 0) { if (!silent) activate(i); return; }
+  const name = path.split("\\").pop();
+  const ext = name.includes(".") ? "." + name.split(".").pop().toLowerCase() : "";
+  const IMG = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".tif", ".tiff"];
+  if (ext === ".pdf") {
+    state.tabs.push({path, name, kind:"pdf"});
+  } else if (IMG.includes(ext)) {
+    state.tabs.push({path, name, kind:"image"});
+  } else {
+    const data = await api.get("/api/file?path=" + encodeURIComponent(path));
+    if (data.error) { if (!silent) toast(name + ": " + data.error, "err"); return; }
+    state.tabs.push({path, name, kind:"text", content:data.content, dirty:false, lang:langFor(path), mtime:data.mtime});
+  }
+  if (!silent) activate(state.tabs.length - 1);
+  else renderTabs();
+  persistTabs();
+}
+function syncActive() {
+  // Flush the live textarea into the active tab's model. Every path that
+  // mutates state.tabs or calls showPane must call this first, or in-flight
+  // keystrokes are silently discarded.
+  const t = state.tabs[state.active];
+  if (t && t.kind === "text") t.content = $("editor").value;
+}
+function activate(i) {
+  syncActive();
+  state.active = i;
+  const tab = state.tabs[i];
+  if (tab && tab.kind === "pdf") state.lastPdf = tab.path;
+  renderTabs(); showPane(); markActiveRow();
+  updateGit(tab ? tab.path : state.root);
+  updateActions(); updateCtxLine();
+  updatePreviewPane();
+  // Opening a markdown file shows its rendered reader on the right.
+  if (tab && tab.kind === "text" && tab.lang === "markdown") setRightTab("preview");
+}
+function closeTab(i, ev) {
+  if (ev) ev.stopPropagation();
+  const t = state.tabs[i];
+  const doClose = () => {
+    syncActive();
+    if (t.kind === "pdf") dropPdfFrame(t.path);
+    const wasActive = i === state.active;
+    state.tabs.splice(i, 1);
+    // Keep the same tab focused when a lower-index tab is removed.
+    if (i < state.active) state.active -= 1;
+    if (state.active >= state.tabs.length) state.active = state.tabs.length - 1;
+    renderTabs();
+    if (wasActive) showPane();
+    markActiveRow(); updateActions(); updateCtxLine(); persistTabs();
+  };
+  if (t.kind === "text" && t.dirty)
+    confirmModal("Unsaved changes", t.name + " has unsaved changes. Close anyway?", doClose);
+  else doClose();
+}
+function renderTabs() {
+  const strip = $("tabstrip");
+  strip.innerHTML = "";
+  state.tabs.forEach((t, i) => {
+    const el = document.createElement("div");
+    el.className = "tab" + (i === state.active ? " active" : "") + (t.dirty ? " dirty" : "");
+    el.innerHTML = '<span class="dot">●</span><span class="tnm"></span><button class="x" title="Close">×</button>';
+    el.querySelector(".tnm").textContent = t.name;
+    el.title = t.path;
+    el.addEventListener("click", () => activate(i));
+    el.addEventListener("auxclick", ev => { if (ev.button === 1) closeTab(i, ev); });
+    el.querySelector(".x").addEventListener("click", ev => closeTab(i, ev));
+    strip.appendChild(el);
+  });
+}
+function persistTabs() {
+  api.post("/api/tabs", {tabs: state.tabs.map(t => t.path)});
+}
+const pdfFrames = {};   // path -> iframe kept alive so scroll position persists
+function showPane() {
+  const t = state.tabs[state.active];
+  $("midempty").style.display = t ? "none" : "flex";
+  $("pdfhost").style.display = t && t.kind === "pdf" ? "block" : "none";
+  $("imghost").style.display = t && t.kind === "image" ? "flex" : "none";
+  const isText = t && t.kind === "text";
+  $("edstack").style.display = isText ? "block" : "none";
+  $("lines").style.display = isText ? "block" : "none";
+  if (typeof hideAc === "function") hideAc();
+  // Show only the active PDF's cached frame; hidden frames retain their page.
+  for (const p in pdfFrames)
+    pdfFrames[p].style.display = (t && t.kind === "pdf" && t.path === p) ? "block" : "none";
+  if (t && t.kind === "image") {
+    $("imghost").innerHTML = '<img alt="" src="' + withTok("/img?path=" + encodeURIComponent(t.path)) + '">';
+    $("st-file").textContent = t.path;
+    $("st-save").textContent = "image"; $("st-pos").textContent = ""; $("st-words").textContent = "";
+  } else if (t && t.kind === "pdf") {
+    if (!pdfFrames[t.path]) {
+      const fr = document.createElement("iframe");
+      fr.title = "PDF"; fr.style.cssText = "width:100%;height:100%;border:none;";
+      fr.src = withTok("/pdf?path=" + encodeURIComponent(t.path));
+      pdfFrames[t.path] = fr;
+      $("pdfhost").appendChild(fr);
+    }
+    $("st-file").textContent = t.path;
+    $("st-save").textContent = "reading"; $("st-pos").textContent = ""; $("st-words").textContent = "";
+  } else if (isText) {
+    $("editor").value = t.content;
+    repaint();
+    $("st-file").textContent = t.path;
+    $("st-save").textContent = t.dirty ? "modified" : "saved";
+  } else {
+    $("st-file").textContent = "–"; $("st-save").textContent = "";
+    $("st-pos").textContent = ""; $("st-words").textContent = "";
+  }
+}
+function dropPdfFrame(path) {
+  if (pdfFrames[path]) { pdfFrames[path].remove(); delete pdfFrames[path]; }
+}
+function reloadPdfFrame(path) {
+  if (pdfFrames[path]) pdfFrames[path].src = withTok("/pdf?path=" + encodeURIComponent(path) + "&t=" + Date.now());
+}
+
+/* ---------- syntax highlighting ---------- */
+function tokenize(src, rules) {
+  const combined = new RegExp(rules.map(r => "(" + r[0] + ")").join("|"), "gm");
+  let out = "", last = 0, m;
+  while ((m = combined.exec(src))) {
+    out += esc(src.slice(last, m.index));
+    let cls = "";
+    for (let k = 0; k < rules.length; k++) if (m[k + 1] !== undefined) { cls = rules[k][1]; break; }
+    out += '<span class="tk-' + cls + '">' + esc(m[0]) + '</span>';
+    last = m.index + m[0].length;
+    if (m[0].length === 0) combined.lastIndex++;
+  }
+  return out + esc(src.slice(last));
+}
+const RULES = {
+  latex: [
+    ["%[^\\n]*", "cmt"],
+    ["\\\\(?:part|chapter|section|subsection|subsubsection|paragraph|subparagraph|title|author|maketitle|abstract)\\*?(?:\\{[^{}\\n]*\\})?", "sec"],
+    ["\\\\(?:begin|end)\\{[^{}\\n]*\\}", "env"],
+    ["\\\\(?:cite[a-zA-Z]*|ref|eqref|pageref|autoref|cref|Cref|label|input|include|includegraphics|bibliography|bibliographystyle|usepackage|documentclass|caption)\\b\\*?", "ref"],
+    ["\\\\[a-zA-Z@]+\\*?", "kw"],
+    ["\\\\[^a-zA-Z\\s]", "kw"],
+    ["\\$\\$?[^$\\n]*\\$\\$?", "math"],
+    ["[{}\\[\\]&~^_]", "pun"],
+  ],
+  python: [
+    ["(?:'''[\\s\\S]*?'''|\"\"\"[\\s\\S]*?\"\"\")", "str"],
+    ["#[^\\n]*", "cmt"],
+    ["(?:'(?:\\\\.|[^'\\\\\\n])*'|\"(?:\\\\.|[^\"\\\\\\n])*\")", "str"],
+    ["@\\w[\\w.]*", "dec"],
+    ["(?<=\\b(?:def|class)\\s)[A-Za-z_]\\w*", "fn"],
+    ["\\b(?:def|class|return|if|elif|else|for|while|import|from|as|with|try|except|finally|raise|pass|break|continue|lambda|yield|global|nonlocal|assert|del|not|and|or|in|is|None|True|False|async|await|match|case)\\b", "kw"],
+    ["\\b(?:self|cls)\\b", "dec"],
+    ["\\b[A-Za-z_]\\w*(?=\\s*\\()", "fn"],
+    ["\\b\\d[\\d_]*(?:\\.\\d+)?(?:[eE][+-]?\\d+)?j?\\b", "num"],
+  ],
+  bibtex: [
+    ["%[^\\n]*", "cmt"],
+    ["@\\w+", "kw"],
+    ["(?<=@\\w{1,24}\\{)[^,\\s{}]+", "fn"],
+    ["^\\s*[\\w-]+(?=\\s*=)", "dec"],
+    ["[{}=,]", "pun"],
+  ],
+  markdown: [
+    ["^#{1,6}[^\\n]*", "sec"],
+    ["```[\\s\\S]*?```", "str"],
+    ["`[^`\\n]+`", "str"],
+    ["\\*\\*[^*\\n]+\\*\\*", "dec"],
+    ["(?<![*\\w])\\*[^*\\n]+\\*(?![*\\w])", "env"],
+    ["^>[^\\n]*", "cmt"],
+    ["\\[[^\\]\\n]*\\]\\([^)\\n]*\\)", "ref"],
+  ],
+  json: [
+    ["\"(?:\\\\.|[^\"\\\\])*\"(?=\\s*:)", "dec"],
+    ["\"(?:\\\\.|[^\"\\\\])*\"", "str"],
+    ["\\b(?:true|false|null)\\b", "kw"],
+    ["-?\\b\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?\\b", "num"],
+    ["[{}\\[\\],:]", "pun"],
+  ],
+};
+function highlight(src, lang) {
+  const rules = RULES[lang];
+  if (!rules) return esc(src);
+  try { return tokenize(src, rules); } catch (e) { return esc(src); }
+}
+let repaintQueued = false;
+function repaint() {
+  if (repaintQueued) return;
+  repaintQueued = true;
+  // rAF stalls in a hidden tab, so fall back to a timer there.
+  const schedule = document.hidden ? fn => setTimeout(fn, 16) : requestAnimationFrame;
+  schedule(() => {
+    repaintQueued = false;
+    const t = state.tabs[state.active];
+    if (!t || t.kind !== "text") return;
+    const v = $("editor").value;
+    $("hl").firstElementChild.innerHTML = highlight(v, t.lang) + "\n";
+    renumber(v);
+    syncScroll();
+    updatePos();
+  });
+}
+function renumber(v) {
+  const n = v.split("\n").length;
+  let s = "";
+  for (let i = 1; i <= n; i++) s += i + "\n";
+  $("lines").textContent = s;
+}
+function syncScroll() {
+  $("hl").scrollTop = $("editor").scrollTop;
+  $("hl").scrollLeft = $("editor").scrollLeft;
+  $("lines").scrollTop = $("editor").scrollTop;
+}
+function updatePos() {
+  const t = state.tabs[state.active];
+  if (!t || t.kind !== "text") return;
+  const v = $("editor").value, pos = $("editor").selectionStart;
+  const before = v.slice(0, pos);
+  const line = (before.match(/\n/g) || []).length + 1;
+  const col = pos - before.lastIndexOf("\n");
+  $("st-pos").textContent = "Ln " + line + ", Col " + col;
+  let words;
+  if (t.lang === "latex")
+    words = v.replace(/%[^\n]*/g, " ").replace(/\\[a-zA-Z]+/g, " ")
+             .replace(/[{}\[\]$&~^_]/g, " ").split(/\s+/).filter(Boolean).length;
+  else words = v.split(/\s+/).filter(Boolean).length;
+  $("st-words").textContent = words + " words";
+}
+/* ---------- autocomplete + editor shortcuts ---------- */
+const COMMENT_TOKEN = {latex: "%", python: "#", bibtex: "%"};
+const LATEX_CMDS = ["\\section{}","\\subsection{}","\\subsubsection{}","\\paragraph{}",
+  "\\textbf{}","\\textit{}","\\emph{}","\\underline{}","\\texttt{}","\\textsc{}",
+  "\\begin{}","\\end{}","\\item","\\cite{}","\\citep{}","\\citet{}","\\ref{}","\\eqref{}",
+  "\\label{}","\\footnote{}","\\caption{}","\\includegraphics[width=\\linewidth]{}",
+  "\\usepackage{}","\\documentclass{}","\\frac{}{}","\\sqrt{}","\\sum","\\prod","\\int",
+  "\\lim","\\infty","\\partial","\\nabla","\\cdot","\\times","\\div","\\pm","\\mp",
+  "\\leq","\\geq","\\neq","\\approx","\\equiv","\\propto","\\rightarrow","\\Rightarrow",
+  "\\leftarrow","\\Leftarrow","\\leftrightarrow","\\mapsto","\\left","\\right",
+  "\\mathbb{}","\\mathcal{}","\\mathrm{}","\\mathbf{}","\\boldsymbol{}","\\text{}","\\hat{}","\\bar{}","\\tilde{}","\\vec{}",
+  "\\alpha","\\beta","\\gamma","\\delta","\\epsilon","\\varepsilon","\\zeta","\\eta",
+  "\\theta","\\vartheta","\\iota","\\kappa","\\lambda","\\mu","\\nu","\\xi","\\pi","\\rho","\\sigma",
+  "\\tau","\\upsilon","\\phi","\\varphi","\\chi","\\psi","\\omega","\\Gamma","\\Delta","\\Theta",
+  "\\Lambda","\\Xi","\\Pi","\\Sigma","\\Phi","\\Psi","\\Omega",
+  "\\bibliography{}","\\bibliographystyle{}","\\input{}","\\include{}",
+  "\\newcommand{}{}","\\renewcommand{}{}","\\tableofcontents","\\maketitle",
+  "\\title{}","\\author{}","\\date{}","\\hline","\\midrule","\\toprule","\\bottomrule",
+  "\\centering","\\raggedright","\\vspace{}","\\hspace{}","\\newpage","\\clearpage",
+  "\\noindent","\\quad","\\qquad","\\textwidth","\\linewidth","\\columnwidth",
+  "\\begin{equation}","\\begin{align}","\\begin{itemize}","\\begin{enumerate}",
+  "\\begin{figure}","\\begin{table}"];
+const LATEX_ENVS = ["equation","equation*","align","align*","itemize","enumerate","description",
+  "figure","figure*","table","table*","tabular","array","matrix","bmatrix","pmatrix","vmatrix",
+  "cases","split","gather","gather*","multline","verbatim","lstlisting","quote","quotation",
+  "abstract","center","flushleft","flushright","theorem","lemma","proof","corollary","definition",
+  "proposition","remark","example","algorithm","algorithmic","frame","columns","minipage",
+  "subfigure","wrapfigure","thebibliography"];
+const PY_WORDS = ["def","class","return","if","elif","else","for","while","import","from","as",
+  "with","try","except","finally","raise","pass","break","continue","lambda","yield","global",
+  "nonlocal","assert","del","not","and","or","in","is","None","True","False","async","await",
+  "match","case","print","len","range","enumerate","zip","list","dict","set","tuple","str","int",
+  "float","bool","bytes","open","input","sum","min","max","abs","round","sorted","reversed","map",
+  "filter","any","all","isinstance","issubclass","type","super","object","property","staticmethod",
+  "classmethod","format","join","append","extend","insert","remove","pop","split","strip","replace",
+  "startswith","endswith","items","keys","values","update","self","__init__","__name__","__main__"];
+
+let ac = {open: false, items: [], sel: 0, start: 0};
+const acEl = document.createElement("div"); acEl.id = "ac-popup"; document.body.appendChild(acEl);
+
+function currentTextLang() {
+  const t = state.tabs[state.active];
+  return (t && t.kind === "text") ? t.lang : null;
+}
+function caretXY(ta, pos) {
+  const div = document.createElement("div");
+  const s = getComputedStyle(ta);
+  ["fontFamily","fontSize","fontWeight","lineHeight","letterSpacing","paddingTop","paddingLeft",
+   "paddingRight","paddingBottom","borderTopWidth","borderLeftWidth","tabSize"].forEach(p => div.style[p] = s[p]);
+  div.style.position = "absolute"; div.style.visibility = "hidden";
+  div.style.whiteSpace = "pre"; div.style.left = "-9999px"; div.style.top = "0";
+  div.appendChild(document.createTextNode(ta.value.slice(0, pos)));
+  const span = document.createElement("span"); span.textContent = "​";
+  div.appendChild(span);
+  document.body.appendChild(div);
+  const r = ta.getBoundingClientRect();
+  const lh = parseFloat(s.lineHeight) || parseFloat(s.fontSize) * 1.55;
+  const x = r.left + span.offsetLeft - ta.scrollLeft;
+  const y = r.top + span.offsetTop - ta.scrollTop;
+  document.body.removeChild(div);
+  return {x, y, lh};
+}
+function renderAc() {
+  acEl.innerHTML = "";
+  ac.items.slice(0, 12).forEach((it, i) => {
+    const row = document.createElement("div");
+    row.className = "ac-row" + (i === ac.sel ? " sel" : "");
+    row.textContent = it.label;
+    row.addEventListener("mousedown", ev => { ev.preventDefault(); ac.sel = i; acceptAc(); });
+    acEl.appendChild(row);
+  });
+}
+function showAc(start, items) {
+  if (!items.length) { hideAc(); return; }
+  ac.open = true; ac.items = items; ac.sel = 0; ac.start = start;
+  renderAc();
+  const {x, y, lh} = caretXY($("editor"), $("editor").selectionStart);
+  acEl.style.left = Math.min(x, innerWidth - 260) + "px";
+  acEl.style.top = Math.min(y + lh + 2, innerHeight - 240) + "px";
+  acEl.classList.add("open");
+}
+function hideAc() { ac.open = false; acEl.classList.remove("open"); }
+function acceptAc() {
+  if (!ac.open || !ac.items[ac.sel]) return;
+  const ed = $("editor");
+  const insert = ac.items[ac.sel].insert;
+  ed.setSelectionRange(ac.start, ed.selectionStart);
+  document.execCommand("insertText", false, insert);
+  const brace = insert.indexOf("{}");
+  if (brace >= 0) { const c = ac.start + brace + 1; ed.setSelectionRange(c, c); }
+  hideAc(); repaint();
+}
+function computeAc() {
+  const lang = currentTextLang();
+  const ed = $("editor");
+  if (!lang || ed.selectionStart !== ed.selectionEnd) { hideAc(); return; }
+  const pos = ed.selectionStart;
+  const before = ed.value.slice(0, pos);
+  if (lang === "latex") {
+    let m = before.match(/\\(?:begin|end)\{([a-zA-Z*]*)$/);
+    if (m) {
+      const w = m[1];
+      const items = LATEX_ENVS.filter(e => e.toLowerCase().startsWith(w.toLowerCase()))
+        .map(e => ({label: e, insert: e}));
+      return items.length ? showAc(pos - w.length, items) : hideAc();
+    }
+    m = before.match(/\\([a-zA-Z]+)$/);
+    if (m) {
+      const w = m[1];
+      const items = LATEX_CMDS.filter(c => c.slice(1).toLowerCase().startsWith(w.toLowerCase()))
+        .map(c => ({label: c, insert: c}));
+      if (items.length) return showAc(pos - w.length - 1, items);
+    }
+    return hideAc();
+  }
+  if (lang === "python") {
+    const m = before.match(/([A-Za-z_][A-Za-z0-9_]*)$/);
+    if (m && m[1].length >= 2) {
+      const w = m[1];
+      const items = PY_WORDS.filter(x => x.toLowerCase().startsWith(w.toLowerCase()) && x !== w)
+        .map(x => ({label: x, insert: x}));
+      if (items.length) return showAc(pos - w.length, items);
+    }
+    return hideAc();
+  }
+  hideAc();
+}
+function maybeAutoEnd() {
+  if (currentTextLang() !== "latex") return;
+  const ed = $("editor");
+  const pos = ed.selectionStart;
+  const before = ed.value.slice(0, pos);
+  const m = before.match(/\\begin\{([a-zA-Z*]+)\}$/);
+  if (!m) return;
+  const env = m[1];
+  const after = ed.value.slice(pos);
+  if (new RegExp("^\\s*\\\\end\\{" + env.replace("*", "\\*") + "\\}").test(after)) return;
+  const lineStart = before.lastIndexOf("\n") + 1;
+  const indent = (before.slice(lineStart).match(/^\s*/) || [""])[0];
+  document.execCommand("insertText", false, "\n" + indent + "  \n" + indent + "\\end{" + env + "}");
+  const c = pos + 1 + indent.length + 2;
+  ed.setSelectionRange(c, c);
+}
+function reindent(delta) {
+  const ed = $("editor"), v = ed.value;
+  const ls = v.lastIndexOf("\n", ed.selectionStart - 1) + 1;
+  let le = v.indexOf("\n", ed.selectionEnd); if (le < 0) le = v.length;
+  const lines = v.slice(ls, le).split("\n")
+    .map(l => delta > 0 ? "  " + l : l.replace(/^ {1,2}/, ""));
+  const nb = lines.join("\n");
+  ed.setSelectionRange(ls, le);
+  document.execCommand("insertText", false, nb);
+  ed.setSelectionRange(ls, ls + nb.length);
+  repaint();
+}
+function toggleComment() {
+  const t = state.tabs[state.active];
+  if (!t || t.kind !== "text") return;
+  const tok = COMMENT_TOKEN[t.lang]; if (!tok) return;
+  const ed = $("editor"), v = ed.value;
+  const ls = v.lastIndexOf("\n", ed.selectionStart - 1) + 1;
+  let le = v.indexOf("\n", ed.selectionEnd); if (le < 0) le = v.length;
+  const lines = v.slice(ls, le).split("\n");
+  const nonBlank = lines.filter(l => l.trim());
+  const commented = nonBlank.length && nonBlank.every(l => l.trimStart().startsWith(tok));
+  let out;
+  if (commented) {
+    out = lines.map(l => { const i = l.indexOf(tok); return i < 0 ? l : l.slice(0, i) + l.slice(i + tok.length).replace(/^ /, ""); });
+  } else {
+    const indent = Math.min.apply(null, nonBlank.map(l => l.match(/^\s*/)[0].length));
+    out = lines.map(l => l.trim() ? l.slice(0, indent) + tok + " " + l.slice(indent) : l);
+  }
+  const nb = out.join("\n");
+  ed.setSelectionRange(ls, le);
+  document.execCommand("insertText", false, nb);
+  ed.setSelectionRange(ls, ls + nb.length);
+  repaint();
+}
+
+$("editor").addEventListener("input", () => {
+  const t = state.tabs[state.active];
+  if (t && t.kind === "text" && !t.dirty) { t.dirty = true; renderTabs(); $("st-save").textContent = "modified"; }
+  repaint();
+  computeAc();
+  if (t && t.kind === "text" && t.lang === "markdown") {
+    clearTimeout(mdTimer);
+    mdTimer = setTimeout(renderMarkdownPreview, 250);
+  }
+});
+$("editor").addEventListener("scroll", () => { syncScroll(); if (ac.open) hideAc(); });
+$("editor").addEventListener("keyup", updatePos);
+$("editor").addEventListener("click", () => { updatePos(); hideAc(); });
+$("editor").addEventListener("blur", () => setTimeout(hideAc, 150));
+$("editor").addEventListener("keydown", ev => {
+  const ed = $("editor");
+  if (ac.open) {
+    const n = Math.min(ac.items.length, 12);
+    if (ev.key === "ArrowDown") { ev.preventDefault(); ac.sel = (ac.sel + 1) % n; renderAc(); return; }
+    if (ev.key === "ArrowUp") { ev.preventDefault(); ac.sel = (ac.sel - 1 + n) % n; renderAc(); return; }
+    if (ev.key === "Enter" || ev.key === "Tab") { ev.preventDefault(); acceptAc(); return; }
+    if (ev.key === "Escape") { ev.preventDefault(); hideAc(); return; }
+  }
+  const mod = ev.ctrlKey || ev.metaKey;
+  if (mod && ev.key === "/") { ev.preventDefault(); toggleComment(); return; }
+  if (mod && ev.key === " ") { ev.preventDefault(); computeAc(); return; }   // force suggestions
+  if (ev.key === "Tab") {
+    ev.preventDefault();
+    const multi = ed.value.slice(ed.selectionStart, ed.selectionEnd).includes("\n");
+    if (ev.shiftKey) reindent(-1);
+    else if (multi) reindent(1);
+    else document.execCommand("insertText", false, "  ");
+    return;
+  }
+  if (mod || ev.altKey) return;
+  const open = {"{": "}", "(": ")", "[": "]"};
+  const s = ed.selectionStart, e = ed.selectionEnd, sel = ed.value.slice(s, e);
+  if (open[ev.key]) {
+    ev.preventDefault();
+    document.execCommand("insertText", false, ev.key + sel + open[ev.key]);
+    ed.setSelectionRange(s + 1, s + 1 + sel.length);
+    repaint(); return;
+  }
+  if (ev.key === "$") {
+    ev.preventDefault();
+    if (!sel && ed.value[s] === "$") { ed.setSelectionRange(s + 1, s + 1); return; }
+    document.execCommand("insertText", false, "$" + sel + "$");
+    if (!sel) ed.setSelectionRange(s + 1, s + 1);
+    repaint(); return;
+  }
+  if ((ev.key === ")" || ev.key === "]") && s === e && ed.value[s] === ev.key) {
+    ev.preventDefault(); ed.setSelectionRange(s + 1, s + 1); return;
+  }
+  if (ev.key === "}") {
+    ev.preventDefault();
+    if (s === e && ed.value[s] === "}") { ed.setSelectionRange(s + 1, s + 1); return; }
+    document.execCommand("insertText", false, "}");
+    maybeAutoEnd(); repaint(); return;
+  }
+  if (ev.key === "Backspace" && s === e && s > 0 && open[ed.value[s - 1]] === ed.value[s]) {
+    ev.preventDefault();
+    ed.setSelectionRange(s - 1, s + 1);
+    document.execCommand("insertText", false, "");
+    repaint(); return;
+  }
+});
+async function saveTab(t, force) {
+  if (!t || t.kind !== "text") return;
+  const r = await api.post("/api/file",
+    {path: t.path, content: t.content, base_mtime: force ? null : t.mtime});
+  if (r.error === "conflict") {
+    confirmModal("File changed on disk",
+      t.name + " was modified outside the editor (likely by Claude). Overwrite with your version?",
+      () => saveTab(t, true));
+    return;
+  }
+  if (r.error) { toast("Save failed: " + r.error, "err"); return; }
+  t.dirty = false; t.mtime = r.mtime; renderTabs();
+  if (t === state.tabs[state.active]) $("st-save").textContent = "saved";
+}
+async function saveActive(force) {
+  syncActive();
+  await saveTab(state.tabs[state.active], force);
+}
+function goToLine(line) {
+  const v = $("editor").value;
+  let idx = 0;
+  for (let l = 1; l < line; l++) {
+    idx = v.indexOf("\n", idx) + 1;
+    if (idx <= 0) { idx = v.length; break; }
+  }
+  const end = v.indexOf("\n", idx);
+  $("editor").focus();
+  $("editor").setSelectionRange(idx, end < 0 ? v.length : end);
+  const lh = (state.settings.font_size || 12) * 1.55;
+  $("editor").scrollTop = Math.max(0, (line - 6) * lh);
+  syncScroll(); updatePos();
+}
+
+/* ================= git ================= */
+async function updateGit(path) {
+  const info = await api.get("/api/gitinfo?path=" + encodeURIComponent(path || state.root));
+  state.gitInfo = info;
+  const btn = $("gitbtn"), sync = $("syncbtn");
+  if (!info.repo) {
+    btn.className = ""; btn.textContent = "local · no git";
+    sync.style.display = "none";
+    return;
+  }
+  btn.className = "hasrepo";
+  const arrows = (info.ahead ? " ↑" + info.ahead : "") + (info.behind ? " ↓" + info.behind : "");
+  btn.innerHTML = '⎇ <span class="br"></span>' +
+    (info.dirty ? ' <span class="dirty">●</span>' : "") +
+    '<span class="arr"></span><span class="sync"></span>';
+  btn.querySelector(".br").textContent = info.branch;
+  btn.querySelector(".arr").textContent = arrows;
+  btn.querySelector(".sync").textContent = info.sync.join(" · ");
+  // Sync button appears whenever a repo is active; it highlights when there
+  // is something to pull or push and labels itself with the counts.
+  const hasRemote = Object.keys(info.remotes).length > 0;
+  sync.style.display = hasRemote ? "" : "none";
+  const pending = info.ahead || info.behind;
+  sync.classList.toggle("pending", !!pending);
+  sync.textContent = "⟲ Sync" + (arrows ? "  " + arrows.trim() : "");
+}
+// A remote's kind (github/overleaf/remote) in the user's own words.
+function remoteKindLabel(kind) {
+  return kind === "github" ? "GitHub (code)"
+       : kind === "overleaf" ? "Overleaf (documents)"
+       : "other remote";
+}
+function remoteLabel(info, name) {
+  const kind = (info.remotes || {})[name] || "remote";
+  const friendly = remoteKindLabel(kind);
+  // Show the git remote name too only when it would otherwise be ambiguous
+  // (two remotes of the same kind), so the label stays clean in the common case.
+  const sameKind = Object.values(info.remotes).filter(k => k === kind).length > 1;
+  return sameKind ? friendly + " — " + name : friendly;
+}
+// Publish is the friendly entry point: it asks where to send the work only
+// when there is a real choice. No remote yet -> offer to connect one; exactly
+// one -> just publish; several -> ask code (GitHub) vs documents (Overleaf) vs all.
+function gitSync() {
+  const info = state.gitInfo;
+  if (!info || !info.repo) { toast("No git repository in this workspace", "warn"); return; }
+  const names = Object.keys(info.remotes || {});
+  if (names.length === 0) {
+    toast("This folder is not connected yet — choose Overleaf or GitHub", "warn", 4000);
+    openConnect();
+    return;
+  }
+  if (names.length === 1) { runSync(names); return; }
+  openPublishChoice(info, names);
+}
+// A small popup under the Sync button listing each destination plus "all".
+function openPublishChoice(info, names) {
+  const m = $("gitmenu");
+  m.innerHTML = "";
+  const add = (label, fn) => {
+    const b = document.createElement("button");
+    b.textContent = label;
+    b.addEventListener("click", () => { closeMenus(); fn(); });
+    m.appendChild(b);
+  };
+  for (const n of names) add("Publish to " + remoteLabel(info, n), () => runSync([n]));
+  m.insertAdjacentHTML("beforeend", '<div class="sep"></div>');
+  add("Publish to all (" + names.length + ")", () => runSync(names));
+  const rect = $("syncbtn").getBoundingClientRect();
+  openMenuAt(m, rect.left, rect.bottom + 4);
+}
+async function runSync(remotes) {
+  const info = state.gitInfo;
+  const sync = $("syncbtn");
+  sync.classList.add("busy");
+  const cur = state.tabs[state.active];
+  const r = await api.post("/api/gitop",
+    {path: (cur ? cur.path : state.root), op: "sync", remotes});
+  if (r.error) { toast(r.error, "err"); sync.classList.remove("busy"); return; }
+  showDock("out");
+  const dest = remotes.length > 1 ? "all remotes" : remoteLabel(info, remotes[0]);
+  followJob(r.job, rc => {
+    sync.classList.remove("busy");
+    updateGit(cur ? cur.path : state.root);
+    toast(rc === 0 ? "Published to " + dest : "Publish had a problem, see Output",
+      rc === 0 ? "" : "err", rc === 0 ? 3000 : 5000);
+  });
+}
+$("syncbtn").addEventListener("click", gitSync);
+$("revealbtn").addEventListener("click", () => {
+  if (state.root) api.post("/api/reveal", {path: state.root});
+});
+$("gitbtn").addEventListener("click", ev => {
+  ev.stopPropagation();
+  const m = $("gitmenu");
+  m.innerHTML = "";
+  const info = state.gitInfo;
+  const add = (label, fn) => {
+    const b = document.createElement("button");
+    b.textContent = label;
+    b.addEventListener("click", () => { closeMenus(); fn(); });
+    m.appendChild(b);
+  };
+  if (info && info.repo) {
+    add("Publish changes…", () => gitSync());
+    add("Commit all…", () => promptModal("Commit message", "", msg => gitOp("commit", null, msg)));
+    add("Pull", () => gitOp("pull"));
+    for (const r of Object.keys(info.remotes)) add("Push to " + remoteLabel(info, r), () => gitOp("push", r));
+    add("Fetch all", () => gitOp("fetch"));
+    add("Status", () => gitOp("status"));
+    add("Recent commits", () => gitOp("log"));
+    m.insertAdjacentHTML("beforeend", '<div class="sep"></div>');
+    add("Open repo in Explorer", () => api.post("/api/reveal", {path: info.repo}));
+    m.insertAdjacentHTML("beforeend", '<div class="sep"></div>');
+    add("Connect Overleaf or GitHub…", () => openConnect());
+  } else {
+    add("Connect Overleaf or GitHub…", () => openConnect());
+    add("Open folder in Explorer", () => api.post("/api/reveal", {path: state.root}));
+  }
+  const rect = $("gitbtn").getBoundingClientRect();
+  openMenuAt(m, rect.left, rect.bottom + 4);
+});
+const CONNECT_HELP = {
+  overleaf: 'In Overleaf, open your project, then Menu → Git, and copy the URL. For the token, go to Account Settings → Git integration and create one.',
+  github: 'Create a repo on github.com, copy its URL. For the token, GitHub → Settings → Developer settings → Personal access tokens → Fine-grained token with Contents read/write on the repo.',
+};
+function openConnect() {
+  updateConnectFields();
+  $("connect-url").value = ""; $("connect-token").value = "";
+  $("connect-ov").classList.add("open");
+  setTimeout(() => $("connect-url").focus(), 30);
+}
+function updateConnectFields() {
+  const p = $("connect-provider").value;
+  $("connect-url-label").textContent = p === "overleaf" ? "Overleaf git URL" : "GitHub repo URL";
+  $("connect-url").placeholder = p === "overleaf" ? "https://git.overleaf.com/…" : "https://github.com/owner/repo";
+  $("connect-token").placeholder = p === "overleaf" ? "Overleaf git token" : "GitHub personal access token";
+  $("connect-help").textContent = CONNECT_HELP[p];
+}
+$("connect-provider").addEventListener("change", updateConnectFields);
+$("connect-cancel").addEventListener("click", () => $("connect-ov").classList.remove("open"));
+$("connect-ok").addEventListener("click", async () => {
+  const provider = $("connect-provider").value;
+  const url = $("connect-url").value.trim(), token = $("connect-token").value.trim();
+  if (!url || !token) { toast("Enter both the URL and the token", "warn"); return; }
+  const cur = state.tabs[state.active];
+  const r = await api.post("/api/git/connect",
+    {path: (cur ? cur.path : state.root), provider, url, token});
+  if (r.error) { toast(r.error, "err", 6000); return; }
+  $("connect-ov").classList.remove("open");
+  const name = provider === "overleaf" ? "Overleaf" : "GitHub";
+  if (r.verified) toast("Connected to " + name + " (remote '" + r.remote + "'). Use Sync to push.", "", 5000);
+  else toast("Remote '" + r.remote + "' added, but the token could not be verified. Check it and try Sync.", "warn", 6000);
+  updateGit(cur ? cur.path : state.root);
+});
+async function gitOp(op, remote, message) {
+  const cur = state.tabs[state.active];
+  const r = await api.post("/api/gitop", {path: (cur ? cur.path : state.root), op, remote, message});
+  if (r.error) { toast(r.error, "err"); return; }
+  showDock("out");
+  followJob(r.job, rc => {
+    updateGit(cur ? cur.path : state.root);
+    if (op === "commit") toast(rc === 0 ? "Committed" : "Commit failed, see Output", rc === 0 ? "" : "err");
+    if (op === "push") toast(rc === 0 ? "Pushed to " + remote : "Push failed, see Output", rc === 0 ? "" : "err");
+    if (op === "pull") toast(rc === 0 ? "Pulled" : "Pull failed, see Output", rc === 0 ? "" : "err");
+  });
+}
+
+/* ================= compile / run ================= */
+function updateActions() {
+  const t = state.tabs[state.active];
+  $("compilebtn").disabled = !(t && t.kind === "text" && t.path.toLowerCase().endsWith(".tex"));
+  $("runbtn").disabled = !(t && t.kind === "text" && t.path.toLowerCase().endsWith(".py"));
+}
+$("compilebtn").addEventListener("click", compileActive);
+async function compileActive() {
+  const t = state.tabs[state.active];
+  if (!t || $("compilebtn").disabled) return;
+  syncActive();
+  // Save every dirty text tab, not just the active one, so \input sections
+  // and the bib do not compile from a stale on-disk copy.
+  for (const tab of state.tabs)
+    if (tab.kind === "text" && tab.dirty) await saveTab(tab);
+  const r = await api.post("/api/compile", {path: t.path});
+  if (r.error) { toast(r.error, "err"); return; }
+  showDock("out");
+  followJob(r.job, (rc, done) => {
+    if (rc === 0) {
+      showPreview(r.pdf); setRightTab("preview");
+      toast("Compiled: " + r.pdf.split("\\").pop());
+    } else if (done && done.missing) {
+      confirmModal("Missing LaTeX package",
+        "The compile failed because the package '" + done.missing +
+        "' is not installed. Install it with tlmgr and recompile?",
+        () => {
+          api.post("/api/texinstall", {pkg: done.missing}).then(ir => {
+            if (ir.error) { toast(ir.error, "err"); return; }
+            showDock("out");
+            followJob(ir.job, irc => {
+              if (irc === 0) { toast("Installed " + done.missing + ", recompiling…"); compileActive(); }
+              else toast("Package install failed, see Output", "err", 5000);
+            });
+          });
+        });
+    } else {
+      toast("Compile failed, see Output", "err", 5000);
+    }
+    updateGit(t.path);
+  });
+}
+$("runbtn").addEventListener("click", async () => {
+  const t = state.tabs[state.active];
+  if (!t || $("runbtn").disabled) return;
+  if (t.dirty) await saveActive();
+  const r = await api.post("/api/run", {path: t.path});
+  if (r.error) { toast(r.error, "err"); return; }
+  showDock("out");
+  followJob(r.job, rc => {
+    if (rc !== 0) toast("Run finished with exit " + rc, "warn");
+  });
+});
+/* ---------- Tools menu ---------- */
+$("toolsbtn").addEventListener("click", ev => {
+  ev.stopPropagation();
+  const m = $("toolsmenu");
+  m.innerHTML = "";
+  const add = (label, fn) => {
+    const b = document.createElement("button");
+    b.textContent = label;
+    b.addEventListener("click", () => { closeMenus(); fn(); });
+    m.appendChild(b);
+  };
+  add("Export LaTeX to Word (.docx)", exportDocx);
+  add("Open external terminal", () => api.post("/api/extterm", {}).then(r => r.error ? toast(r.error, "err") : toast("Opened a terminal")));
+  add("Reveal workspace in Explorer", () => { if (state.root) api.post("/api/reveal", {path: state.root}); });
+  const rect = $("toolsbtn").getBoundingClientRect();
+  openMenuAt(m, rect.left, rect.bottom + 4);
+});
+async function exportDocx() {
+  let t = state.tabs[state.active];
+  let texPath = (t && t.kind === "text" && t.path.toLowerCase().endsWith(".tex")) ? t.path : null;
+  if (!texPath) texPath = state.root + "\\main.tex";
+  if (t && t.kind === "text" && t.dirty) await saveActive();
+  toast("Converting to Word with Pandoc…");
+  const r = await api.post("/api/export/docx", {path: texPath});
+  if (r.error) { toast(r.error, "err", 6000); return; }
+  showDock("out");
+  followJob(r.job, rc => {
+    if (rc === 0) {
+      toast("Exported " + r.docx.split("\\").pop() + " — opening its folder");
+      api.post("/api/reveal", {path: r.docx});
+      loadTree();
+    } else {
+      toast("Word export failed — see Output", "err", 6000);
+    }
+  });
+}
+let lastCompiledPdf = null;
+function showPreview(pdfPath) {
+  lastCompiledPdf = pdfPath;
+  const p = $("preview");
+  p.innerHTML = '<div class="paper-frame"><iframe title="Compiled PDF" src="' +
+    withTok("/pdf?path=" + encodeURIComponent(pdfPath) + "&t=" + Date.now()) + '"></iframe></div>';
+  // If this PDF is also open as a reading tab, refresh that frame too.
+  reloadPdfFrame(pdfPath);
+}
+function mdPreviewDoc(bodyHtml) {
+  const dark = document.documentElement.dataset.theme !== "light";
+  const bg = dark ? "#1A1D23" : "#FDFBF6", fg = dark ? "#D6D9DE" : "#26282D";
+  const acc = dark ? "#D97757" : "#B85C3E", code = dark ? "#12141A" : "#F0ECE2";
+  const brd = dark ? "#333842" : "#DCD5C4", dim = dark ? "#8B919B" : "#666B74";
+  return '<!doctype html><html><head><meta charset="utf-8"><base target="_blank">' +
+    '<style>' +
+    'body{font:15px/1.65 "Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;color:' + fg +
+    ';background:' + bg + ';margin:0;padding:22px 30px;word-wrap:break-word;}' +
+    'h1,h2,h3,h4{line-height:1.3;margin:1.4em 0 .5em;font-weight:650;}' +
+    'h1{font-size:1.8em;border-bottom:1px solid ' + brd + ';padding-bottom:.25em;}' +
+    'h2{font-size:1.45em;border-bottom:1px solid ' + brd + ';padding-bottom:.2em;}' +
+    'h3{font-size:1.2em;}h4{font-size:1.05em;}' +
+    'a{color:' + acc + ';text-decoration:none;}a:hover{text-decoration:underline;}' +
+    'code{background:' + code + ';border-radius:4px;padding:.15em .4em;font:13px "Cascadia Mono",Consolas,monospace;}' +
+    'pre{background:' + code + ';border:1px solid ' + brd + ';border-radius:8px;padding:12px 14px;overflow:auto;}' +
+    'pre code{background:none;padding:0;font-size:13px;line-height:1.5;}' +
+    'blockquote{margin:.6em 0;padding:.2em 1em;border-left:3px solid ' + acc + ';color:' + dim + ';}' +
+    'table{border-collapse:collapse;margin:1em 0;display:block;overflow:auto;}' +
+    'th,td{border:1px solid ' + brd + ';padding:6px 12px;}th{background:' + code + ';}' +
+    'img{max-width:100%;border-radius:6px;}hr{border:none;border-top:1px solid ' + brd + ';margin:1.6em 0;}' +
+    'ul,ol{padding-left:1.6em;}li{margin:.2em 0;}' +
+    'input[type=checkbox]{margin-right:.4em;}' +
+    '::-webkit-scrollbar{width:9px;height:9px;}::-webkit-scrollbar-thumb{background:' + brd + ';border-radius:5px;}' +
+    '</style></head><body>' + bodyHtml + '</body></html>';
+}
+let mdTimer = null;
+function renderMarkdownPreview() {
+  const t = state.tabs[state.active];
+  if (!t || t.kind !== "text" || t.lang !== "markdown") return;
+  const src = (t === state.tabs[state.active] && $("edstack").style.display !== "none")
+    ? $("editor").value : t.content;
+  let body;
+  try { body = marked.parse(src || "", {breaks: false, gfm: true}); }
+  catch (e) { body = "<pre>" + esc(src || "") + "</pre>"; }
+  const p = $("preview");
+  let fr = document.getElementById("md-frame");
+  if (!fr) {
+    p.innerHTML = '<iframe id="md-frame" class="md-frame" title="Markdown preview" sandbox="allow-popups allow-popups-to-escape-sandbox"></iframe>';
+    fr = document.getElementById("md-frame");
+  }
+  fr.srcdoc = mdPreviewDoc(body);
+}
+// Decide what the Preview pane shows for the current tab: a rendered .md, the
+// last compiled PDF, or the empty state.
+function updatePreviewPane() {
+  const t = state.tabs[state.active];
+  if (t && t.kind === "text" && t.lang === "markdown") {
+    renderMarkdownPreview();
+  } else if (lastCompiledPdf) {
+    showPreview(lastCompiledPdf);
+  } else if (!document.querySelector("#preview .paper-frame, #preview .md-frame")) {
+    $("preview").innerHTML = '<div id="preview-empty"><div class="pg"></div><div>Compile a .tex file, or open a .md file, and it renders here.</div></div>';
+  }
+}
+
+/* ================= job console ================= */
+function logJob(kind, text) {
+  const out = $("jobout");
+  const div = document.createElement("div");
+  div.className = kind === "error" || kind === "err" ? "err" : kind === "info" ? "info" : "";
+  div.textContent = text;
+  out.appendChild(div);
+  while (out.children.length > 3000) out.firstChild.remove();
+  out.scrollTop = out.scrollHeight;
+}
+let runningJobId = null;
+function setStopVisible(on) { $("stopjob").style.display = on ? "" : "none"; }
+$("stopjob").addEventListener("click", () => {
+  if (runningJobId) { api.post("/api/job/cancel", {job: runningJobId}); toast("Stopping…"); }
+});
+function followJob(jobId, onDone) {
+  runningJobId = jobId; setStopVisible(true);
+  const es = sse("/api/stream?job=" + jobId);
+  const cleanup = () => { if (runningJobId === jobId) { runningJobId = null; setStopVisible(false); } };
+  es.onmessage = ev => {
+    const m = JSON.parse(ev.data);
+    if (m.kind === "done") {
+      es.close(); cleanup();
+      logJob(m.rc === 0 ? "info" : "err", "── exit " + m.rc + " ──");
+      if (onDone) onDone(m.rc, m);
+    } else logJob(m.kind, m.text);
+  };
+  es.onerror = () => { es.close(); cleanup(); };
+}
+
+/* ================= dock + terminal ================= */
+function showDock(which) {
+  $("dock").classList.remove("closed");
+  document.querySelectorAll(".dtab").forEach(b => b.classList.toggle("active", b.dataset.d === which));
+  $("pane-term").classList.toggle("show", which === "term");
+  $("pane-out").classList.toggle("show", which === "out");
+  if (which === "term") {
+    if (state.hasPty && xterm) { try { xfit.fit(); sendPtyResize(); } catch (e) {} xterm.focus(); }
+    else $("terminput").focus();
+  }
+}
+document.querySelectorAll(".dtab").forEach(b =>
+  b.addEventListener("click", () => showDock(b.dataset.d)));
+$("dockbtn").addEventListener("click", () => $("dock").classList.toggle("closed"));
+$("extterm").addEventListener("click", async () => {
+  const r = await api.post("/api/extterm", {});
+  if (r.error) toast(r.error, "err");
+  else toast("Opened an external terminal in the workspace");
+});
+function termLine(text, cls) {
+  const out = $("termout");
+  const div = document.createElement("div");
+  if (cls) div.className = cls;
+  div.textContent = text;
+  out.appendChild(div);
+  while (out.children.length > 3000) out.firstChild.remove();
+  out.scrollTop = out.scrollHeight;
+}
+// The terminal is a real interactive pseudo-console (xterm.js over a
+// WebSocket) when the server has pywinpty, else a line based fallback.
+var xterm = null, xfit = null, xws = null;
+function xtermTheme() {
+  const dark = document.documentElement.dataset.theme !== "light";
+  return dark
+    ? {background: "#16181D", foreground: "#D6D9DE", cursor: "#D97757", cursorAccent: "#16181D", selectionBackground: "#33384299"}
+    : {background: "#F8F5EE", foreground: "#26282D", cursor: "#B85C3E", cursorAccent: "#F8F5EE", selectionBackground: "#DCD5C4"};
+}
+function initXterm() {
+  $("xterm-host").style.display = "block";
+  $("termout").style.display = "none";
+  $("termform").style.display = "none";
+  xterm = new Terminal({
+    fontFamily: '"Cascadia Mono", Consolas, monospace', fontSize: 13,
+    cursorBlink: true, scrollback: 5000, theme: xtermTheme(),
+  });
+  xfit = new FitAddon.FitAddon();
+  xterm.loadAddon(xfit);
+  xterm.open($("xterm-host"));
+  try { xfit.fit(); } catch (e) {}
+  xterm.onData(d => { if (xws && xws.readyState === 1) xws.send("i" + d); });
+  new ResizeObserver(() => { try { xfit.fit(); sendPtyResize(); } catch (e) {} }).observe($("xterm-host"));
+  connectPty();
+}
+function sendPtyResize() {
+  if (xterm && xws && xws.readyState === 1) xws.send("r" + xterm.cols + "," + xterm.rows);
+}
+function connectPty() {
+  if (xws) { try { xws.close(); } catch (e) {} }
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  xws = new WebSocket(proto + "://" + location.host + "/ws/term?tok=" + WB_TOKEN);
+  xws.onopen = () => { try { xfit.fit(); } catch (e) {} sendPtyResize(); };
+  xws.onmessage = e => xterm.write(e.data);
+  xws.onclose = () => { if (xterm) xterm.write("\r\n\x1b[90m[terminal session ended — reopen the workspace to start a new one]\x1b[0m\r\n"); };
+}
+function restartTerminal(reset) {
+  if (state.hasPty) {
+    if (!xterm) initXterm();
+    else { xterm.reset(); connectPty(); }
+    setTimeout(() => { try { xfit.fit(); sendPtyResize(); } catch (e) {} }, 60);
+  } else {
+    connectTerminal(reset);
+  }
+}
+function connectTerminal(reset) {
+  if (state.termES) { state.termES.close(); state.termES = null; }
+  if (reset) $("termout").innerHTML = "";
+  const es = sse("/api/termstream");
+  state.termES = es;
+  es.onmessage = ev => {
+    const m = JSON.parse(ev.data);
+    if (m.kind === "out") termLine(m.text);
+    else if (m.kind === "done") { termLine("── terminal exited ──", "err"); es.close(); }
+  };
+  es.onerror = () => {};
+}
+const termHistory = []; let histIdx = -1;
+// Programs that need a real terminal (a TTY). The embedded terminal is a
+// pipe, so these cannot run here; open a real console instead.
+const NEEDS_TTY = /^\s*(claude|vim|vi|nvim|nano|emacs|micro|ipython|ssh|less|more|top|htop|python|python3|node|R)\s*$/i;
+$("termform").addEventListener("submit", async ev => {
+  ev.preventDefault();
+  const v = $("terminput").value;
+  if (!v.trim()) return;
+  // PowerShell over the pipe echoes its own prompt and the command, so the
+  // client does not echo, which keeps a single authentic console flow.
+  termHistory.push(v); histIdx = termHistory.length;
+  $("terminput").value = "";
+  if (NEEDS_TTY.test(v)) {
+    const prog = v.trim().split(/\s+/)[0];
+    termLine("❯ " + v, "in");
+    termLine("'" + prog + "' is interactive and needs a real terminal, which the embedded one cannot provide. Opening a real terminal in this folder…", "info");
+    const r = await api.post("/api/extterm", {});
+    if (r.error) termLine(r.error, "err");
+    else termLine("Run '" + prog + "' in the window that just opened.", "info");
+    return;
+  }
+  await api.post("/api/term", {input: v});
+});
+$("terminput").addEventListener("keydown", ev => {
+  if (ev.key === "ArrowUp" && histIdx > 0) { histIdx--; $("terminput").value = termHistory[histIdx]; ev.preventDefault(); }
+  if (ev.key === "ArrowDown") {
+    if (histIdx < termHistory.length - 1) { histIdx++; $("terminput").value = termHistory[histIdx]; }
+    else { histIdx = termHistory.length; $("terminput").value = ""; }
+    ev.preventDefault();
+  }
+});
+$("pane-term").addEventListener("click", ev => {
+  if (state.hasPty) { if (xterm && window.getSelection().isCollapsed) xterm.focus(); return; }
+  if (window.getSelection().isCollapsed && ev.target.tagName !== "INPUT")
+    $("terminput").focus();
+});
+
+/* ================= right tabs + claude ================= */
+function setRightTab(which) {
+  document.querySelectorAll(".rtab").forEach(b => b.classList.toggle("active", b.dataset.r === which));
+  $("preview").classList.toggle("show", which === "preview");
+  $("claude").classList.toggle("show", which === "claude");
+  if (which === "claude") $("chatinput").focus();
+}
+document.querySelectorAll(".rtab").forEach(b =>
+  b.addEventListener("click", () => setRightTab(b.dataset.r)));
+let aiModels = [];
+async function initAiModels(preserve) {
+  const keep = preserve ? $("ai-model").value : null;
+  const r = await api.get("/api/ai/models");
+  aiModels = r.models || [];
+  const dd = $("ai-model");
+  dd.innerHTML = "";
+  for (const m of aiModels) {
+    const o = document.createElement("option");
+    o.value = m.id;
+    o.textContent = m.label + (m.ready ? "" : "  (needs API key)");
+    dd.appendChild(o);
+  }
+  const want = keep || (state.settings && state.settings.ai_model) || r.default || "claude:fable";
+  dd.value = [...dd.options].some(o => o.value === want) ? want
+    : (r.default && [...dd.options].some(o => o.value === r.default) ? r.default : (dd.options[0] && dd.options[0].value));
+  updateAiCap();
+}
+function updateAiCap() {
+  const m = aiModels.find(x => x.id === $("ai-model").value);
+  if (!m) { $("ai-cap").textContent = ""; return; }
+  $("ai-cap").textContent = m.provider === "claude" ? "edits files in this workspace"
+    : m.free ? "local · free · chat only"
+    : m.ready ? "chat only" : "add key in Settings";
+}
+$("ai-model").addEventListener("change", () => {
+  if (state.settings) state.settings.ai_model = $("ai-model").value;
+  updateAiCap();
+  api.post("/api/settings", {ai_model: $("ai-model").value});
+  toast("Model: " + ($("ai-model").selectedOptions[0] || {}).textContent);
+});
+function chatContext() {
+  const t = state.tabs[state.active];
+  const ctx = {};
+  if (t && t.kind === "text") {
+    ctx.file = t.path;
+    ctx.content = $("editor").value;
+    const ed = $("editor");
+    if (ed.selectionStart !== ed.selectionEnd)
+      ctx.selection = ed.value.slice(ed.selectionStart, ed.selectionEnd);
+  }
+  if (t && t.kind === "pdf") ctx.pdf = t.path;
+  else if (state.lastPdf) ctx.pdf = state.lastPdf;
+  return ctx;
+}
+function updateCtxLine() {
+  const ctx = chatContext();
+  const bits = [];
+  if (ctx.file) bits.push(ctx.file.split("\\").pop());
+  if (ctx.pdf) bits.push("📄 " + ctx.pdf.split("\\").pop());
+  $("ctxfile").textContent = bits.length ? bits.join("  ·  ") : "workspace only";
+}
+function mdLite(text) {
+  let s = esc(text);
+  s = s.replace(/```([\s\S]*?)```/g, (m, code) => "<pre><code>" + code.replace(/^\n/, "") + "</code></pre>");
+  s = s.replace(/`([^`\n]+)`/g, "<code>$1</code>");
+  s = s.replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>");
+  const parts = s.split(/\n{2,}/).map(p =>
+    p.startsWith("<pre>") ? p : "<p>" + p + "</p>");
+  return parts.join("");
+}
+function chatAdd(cls, text) {
+  const empty = $("chatempty");
+  if (empty) empty.remove();
+  const div = document.createElement("div");
+  div.className = cls;
+  if (cls === "msg-tool") {
+    const parts = text.split("  ");
+    div.innerHTML = "<b></b> <span></span>";
+    div.querySelector("b").textContent = parts[0];
+    div.querySelector("span").textContent = parts.slice(1).join("  ");
+  } else if (cls === "msg-claude") {
+    div.innerHTML = mdLite(text);
+  } else div.textContent = text;
+  $("chatlog").appendChild(div);
+  $("chatlog").scrollTop = $("chatlog").scrollHeight;
+  return div;
+}
+$("chatform").addEventListener("submit", async ev => {
+  ev.preventDefault();
+  if (state.chatBusy) return;
+  const prompt = $("chatinput").value.trim();
+  if (!prompt) return;
+  $("chatinput").value = "";
+  chatAdd("msg-user", prompt);
+  state.chatBusy = true; $("chatsend").textContent = "Stop"; $("chatsend").classList.add("stop");
+  const thinking = chatAdd("msg-meta", "thinking…");
+  const r = await api.post("/api/claude", {prompt, context: chatContext(), model: $("ai-model").value});
+  if (r.error) {
+    thinking.remove(); chatAdd("msg-err", r.error);
+    state.chatBusy = false; state.chatJobId = null;
+    $("chatsend").textContent = "Send"; $("chatsend").classList.remove("stop");
+    return;
+  }
+  state.chatJobId = r.job;
+  let settled = false, sawError = false;
+  const finish = () => {
+    if (settled) return;
+    settled = true;
+    thinking.remove();
+    state.chatBusy = false; state.chatJobId = null;
+    $("chatsend").textContent = "Send"; $("chatsend").classList.remove("stop");
+  };
+  const es = sse("/api/stream?job=" + r.job);
+  es.onmessage = evn => {
+    const m = JSON.parse(evn.data);
+    if (m.kind === "done") {
+      es.close(); finish();
+      if (m.rc !== 0 && !sawError) chatAdd("msg-err", "The assistant stopped (exit " + m.rc + ").");
+      loadTree(); updateGit(state.tabs[state.active] ? state.tabs[state.active].path : state.root);
+      reloadActiveIfChanged();
+    }
+    else if (m.kind === "text") chatAdd("msg-claude", m.text);
+    else if (m.kind === "tool") chatAdd("msg-tool", m.text);
+    else if (m.kind === "meta") chatAdd("msg-meta", m.text);
+    else if (m.kind === "error") { sawError = true; chatAdd("msg-err", m.text); }
+  };
+  // A dropped stream must never leave the composer wedged shut.
+  es.onerror = () => {
+    es.close();
+    if (!settled) { chatAdd("msg-err", "Connection to the task was lost."); finish(); }
+  };
+});
+// While a task runs, the Send button becomes Stop and cancels it.
+$("chatsend").addEventListener("click", ev => {
+  if (state.chatBusy) {
+    ev.preventDefault();
+    if (state.chatJobId) {
+      api.post("/api/job/cancel", {job: state.chatJobId});
+      chatAdd("msg-meta", "stopping…");
+    }
+  }
+});
+$("chatinput").addEventListener("keydown", ev => {
+  if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey) && !state.chatBusy) {
+    ev.preventDefault();
+    $("chatform").requestSubmit();
+  }
+});
+$("claude").addEventListener("click", ev => {
+  // Do not steal focus when the user is interacting with a control (the model
+  // dropdown especially), or the native select popup snaps shut on click.
+  const tag = ev.target.tagName;
+  if (["BUTTON", "TEXTAREA", "SELECT", "OPTION", "INPUT"].includes(tag)) return;
+  if (ev.target.closest("#aibar")) return;
+  if (window.getSelection().isCollapsed) $("chatinput").focus();
+});
+$("newchat").addEventListener("click", async ev => {
+  ev.preventDefault(); ev.stopPropagation();
+  await api.post("/api/claude/reset");
+  $("chatlog").innerHTML = '<div id="chatempty">Fresh conversation. Ask about the open file, the paper you are reading, or the manuscript.</div>';
+});
+async function reloadActiveIfChanged() {
+  // After Claude edits files, refresh any clean open tab so the editor and
+  // the on-disk mtime stay in sync (otherwise the next save would 409).
+  for (const t of state.tabs) {
+    if (t.kind !== "text" || t.dirty) continue;
+    const data = await api.get("/api/file?path=" + encodeURIComponent(t.path));
+    if (data.error) continue;
+    if (data.content !== t.content) {
+      t.content = data.content;
+      if (t === state.tabs[state.active]) { $("editor").value = data.content; repaint(); }
+    }
+    t.mtime = data.mtime;
+  }
+  reloadPdfFrame(state.lastPdf);
+}
+
+/* ================= folder picker ================= */
+let pickerPath = "";
+async function openPicker(startPath) {
+  $("picker-ov").classList.add("open");
+  await browseTo(startPath || state.root || null);
+  const rec = $("pkrecents");
+  rec.innerHTML = state.recents.length ? "<span>Recent</span>" : "";
+  for (const r of state.recents) {
+    const b = document.createElement("button");
+    b.textContent = r;
+    b.title = r;
+    b.addEventListener("click", () => browseTo(r));
+    rec.appendChild(b);
+  }
+}
+async function browseTo(path) {
+  const data = await api.get("/api/browse" + (path ? "?path=" + encodeURIComponent(path) : ""));
+  if (data.error) { toast(data.error, "err"); return; }
+  pickerPath = data.path;
+  $("pkpath").textContent = data.path;
+  const places = $("pkplaces");
+  places.innerHTML = "";
+  for (const p of data.places || []) {
+    const b = document.createElement("button");
+    b.textContent = p.label;
+    b.title = p.path;
+    b.addEventListener("click", () => browseTo(p.path));
+    places.appendChild(b);
+  }
+  const drives = $("pkdrives");
+  drives.innerHTML = "";
+  for (const d of data.drives || []) {
+    const b = document.createElement("button");
+    b.textContent = d;
+    b.addEventListener("click", () => browseTo(d));
+    drives.appendChild(b);
+  }
+  const list = $("pklist");
+  list.innerHTML = "";
+  if (data.parent) {
+    const up = document.createElement("button");
+    up.className = "prow up"; up.textContent = "↰ ..";
+    up.addEventListener("click", () => browseTo(data.parent));
+    list.appendChild(up);
+  }
+  for (const d of data.dirs) {
+    const b = document.createElement("button");
+    b.className = "prow"; b.textContent = "▤ " + d;
+    b.addEventListener("click", () => browseTo(pickerPath.replace(/\\$/, "") + "\\" + d));
+    list.appendChild(b);
+  }
+}
+$("pkopen").addEventListener("click", async () => {
+  const r = await api.post("/api/root", {path: pickerPath});
+  if (r.ok) {
+    $("picker-ov").classList.remove("open");
+    await refreshRecents();
+    setRoot(r.root, true);
+  } else toast(r.error || "Cannot open that folder", "err");
+});
+$("pkcancel").addEventListener("click", () => {
+  if (state.root) $("picker-ov").classList.remove("open");
+});
+$("pkexplorer").addEventListener("click", async () => {
+  $("pkexplorer").textContent = "⊞ Opening dialog…";
+  const r = await api.post("/api/pickdir", {start: pickerPath || state.root || ""});
+  $("pkexplorer").textContent = "⊞ Browse in Explorer…";
+  if (r.error) { toast(r.error, "err"); return; }
+  if (r.path) {
+    const rr = await api.post("/api/root", {path: r.path});
+    if (rr.ok) { $("picker-ov").classList.remove("open"); await refreshRecents(); setRoot(rr.root, true); }
+    else toast(rr.error || "Cannot open that folder", "err");
+  }
+});
+
+/* ================= quick open ================= */
+async function openQuickOpen() {
+  $("qo-ov").classList.add("open");
+  $("qo-input").value = "";
+  $("qo-list").innerHTML = '<div class="qo-row"><span class="fp">indexing…</span></div>';
+  setTimeout(() => $("qo-input").focus(), 30);
+  if (!state.qoIndex) {
+    const data = await api.get("/api/quickindex");
+    state.qoIndex = data.files || [];
+  }
+  renderQuickOpen("");
+}
+function renderQuickOpen(query) {
+  const q = query.toLowerCase();
+  let hits;
+  if (!q) hits = state.qoIndex.slice(0, 50);
+  else {
+    const starts = [], includes = [], fuzzy = [];
+    for (const rel of state.qoIndex) {
+      const base = rel.split("\\").pop().toLowerCase();
+      if (base.startsWith(q)) starts.push(rel);
+      else if (base.includes(q) || rel.toLowerCase().includes(q)) includes.push(rel);
+      else {
+        let i = 0;
+        for (const c of base) if (c === q[i]) i++;
+        if (i === q.length) fuzzy.push(rel);
+      }
+      if (starts.length > 50) break;
+    }
+    hits = starts.concat(includes, fuzzy).slice(0, 50);
+  }
+  state.qoSel = 0;
+  const list = $("qo-list");
+  list.innerHTML = hits.length ? "" : '<div class="qo-row"><span class="fp">No matching files.</span></div>';
+  hits.forEach((rel, i) => {
+    const row = document.createElement("div");
+    row.className = "qo-row" + (i === 0 ? " sel" : "");
+    row.innerHTML = '<span class="fn"></span><span class="fp"></span>';
+    row.querySelector(".fn").textContent = rel.split("\\").pop();
+    row.querySelector(".fp").textContent = rel;
+    row.addEventListener("click", () => { $("qo-ov").classList.remove("open"); openFile(state.root + "\\" + rel); });
+    list.appendChild(row);
+  });
+}
+$("qo-input").addEventListener("input", () => renderQuickOpen($("qo-input").value.trim()));
+$("qo-input").addEventListener("keydown", ev => {
+  const rows = [...document.querySelectorAll(".qo-row")].filter(r => r.querySelector(".fn"));
+  if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+    ev.preventDefault();
+    if (!rows.length) return;
+    rows[state.qoSel] && rows[state.qoSel].classList.remove("sel");
+    state.qoSel = ev.key === "ArrowDown"
+      ? Math.min(state.qoSel + 1, rows.length - 1) : Math.max(state.qoSel - 1, 0);
+    rows[state.qoSel].classList.add("sel");
+    rows[state.qoSel].scrollIntoView({block: "nearest"});
+  } else if (ev.key === "Enter") {
+    ev.preventDefault();
+    if (rows[state.qoSel]) rows[state.qoSel].click();
+  }
+});
+
+/* ================= citation finder ================= */
+const citeState = {doi: null, meta: null, styles: {}, bibtex: null};
+$("citebtn").addEventListener("click", () => openCite());
+async function openCite() {
+  $("cite-ov").classList.add("open");
+  $("cite-detail").style.display = "none";
+  $("cite-results").innerHTML = "";
+  // Prefill from the editor selection when there is one.
+  let sel = "";
+  const ed = $("editor");
+  if (state.tabs[state.active] && state.tabs[state.active].kind === "text"
+      && ed.selectionStart !== ed.selectionEnd)
+    sel = ed.value.slice(ed.selectionStart, ed.selectionEnd).trim();
+  $("cite-input").value = sel;
+  if (!Object.keys(citeState.styles).length) {
+    const st = await api.get("/api/cite/styles");
+    citeState.styles = st.styles || {};
+    const dd = $("cite-style");
+    dd.innerHTML = "";
+    for (const [k, label] of Object.entries(citeState.styles)) {
+      const o = document.createElement("option");
+      o.value = k; o.textContent = label; dd.appendChild(o);
+    }
+  }
+  setTimeout(() => { $("cite-input").focus(); $("cite-input").select(); }, 30);
+  if (sel.length >= 3) runCiteSearch();
+}
+$("cite-close").addEventListener("click", () => $("cite-ov").classList.remove("open"));
+$("cite-input").addEventListener("keydown", ev => {
+  if (ev.key === "Enter") { ev.preventDefault(); runCiteSearch(); }
+});
+$("find-source").addEventListener("change", runCiteSearch);
+$("find-type").addEventListener("change", runCiteSearch);
+$("find-focus").addEventListener("change", runCiteSearch);
+async function runCiteSearch() {
+  const q = $("cite-input").value.trim();
+  if (q.length < 3) return;
+  const source = $("find-source").value, type = $("find-type").value, focus = $("find-focus").value;
+  $("cite-results").innerHTML = '<div class="cite-empty">Searching…</div>';
+  $("cite-detail").style.display = "none";
+  const r = await api.get("/api/find/search?q=" + encodeURIComponent(q) +
+    "&source=" + source + "&type=" + type + "&focus=" + focus);
+  if (r.error) { $("cite-results").innerHTML = '<div class="cite-empty">' + esc(r.error) + '</div>'; return; }
+  const items = r.items || [];
+  if (!items.length) { $("cite-results").innerHTML = '<div class="cite-empty">No matches. Try different keywords, or add an author or year.</div>'; return; }
+  $("cite-results").innerHTML = "";
+  for (const it of items) {
+    const row = document.createElement("div");
+    row.className = "cite-row" + (it.major ? " major" : "");
+    row.innerHTML = '<div class="ct"></div><div class="cm"></div><div class="cbadges"></div>';
+    row.querySelector(".ct").textContent = it.title || "(untitled)";
+    row.querySelector(".cm").textContent = [it.authors, it.year, it.venue].filter(Boolean).join("  ·  ") || (it.doi || "");
+    const badges = row.querySelector(".cbadges");
+    if (it.publisher) badges.appendChild(mkBadge("pub" + (it.major ? " major" : ""), it.publisher));
+    if (it.type) badges.appendChild(mkBadge("type", it.type.replace(/-/g, " ")));
+    if (it.cited_by != null) badges.appendChild(mkBadge("cited", it.cited_by + " citations"));
+    if (it.oa_url) badges.appendChild(mkBadge("oa", "open access"));
+    row.addEventListener("click", () => selectCite(it, row));
+    $("cite-results").appendChild(row);
+  }
+}
+function mkBadge(cls, text) {
+  const b = document.createElement("span");
+  b.className = "cbadge " + cls; b.textContent = text;
+  return b;
+}
+async function selectCite(it, row) {
+  document.querySelectorAll(".cite-row").forEach(r => r.classList.remove("sel"));
+  if (row) row.classList.add("sel");
+  citeState.doi = it.doi || null; citeState.meta = it; citeState.bibtex = null;
+  $("cite-detail").style.display = "block";
+  const linkUrl = it.url || (it.doi ? "https://doi.org/" + it.doi : "");
+  let meta = "<b>" + esc(it.title || "") + "</b><br>" +
+    esc([it.authors, it.year, it.venue].filter(Boolean).join("  ·  "));
+  meta += it.authoritative
+    ? "<br><span style='color:var(--ok);font-size:10.5px'>✓ authors from the publisher record</span>"
+    : "<br><span style='color:var(--faint);font-size:10.5px'>authors from the index (not publisher-verified)</span>";
+  if (it.doi) meta += "<br><span style='font-family:var(--mono);font-size:11px'>doi:" + esc(it.doi) + "</span>";
+  $("cite-meta").innerHTML = meta;
+  $("cite-abstract").textContent = it.abstract || "";
+  // Disable formats that need a DOI when the record has none.
+  const needsDoi = !citeState.doi;
+  [...$("cite-style").options].forEach(o => { o.disabled = needsDoi && o.value !== "bibtex"; });
+  if (needsDoi) $("cite-style").value = "bibtex";
+  await loadCiteFormat($("cite-style").value);
+}
+$("cite-style").addEventListener("change", () => loadCiteFormat($("cite-style").value));
+async function getBibtex() {
+  if (citeState.bibtex) return citeState.bibtex;
+  const r = await api.post("/api/find/bibtex", citeState.meta || {doi: citeState.doi});
+  if (r.error) return null;
+  citeState.bibtex = r.text;
+  return r.text;
+}
+async function loadCiteFormat(style) {
+  $("cite-out").value = "Fetching…";
+  if (style === "bibtex") {
+    const bib = await getBibtex();
+    $("cite-out").value = bib || "Could not build BibTeX.";
+    return;
+  }
+  if (!citeState.doi) { $("cite-out").value = "Formatted styles need a DOI. This record has none; use BibTeX."; return; }
+  const r = await api.get("/api/cite/format?doi=" + encodeURIComponent(citeState.doi) + "&style=" + style);
+  if (r.error) { $("cite-out").value = "Could not fetch this style (" + r.error + "). Try another format."; return; }
+  $("cite-out").value = r.text;
+}
+$("cite-copy").addEventListener("click", () => {
+  navigator.clipboard.writeText($("cite-out").value); toast("Copied");
+});
+$("cite-open").addEventListener("click", () => {
+  const it = citeState.meta || {};
+  const url = it.oa_url || it.url || (citeState.doi ? "https://doi.org/" + citeState.doi : "");
+  if (url && /^https:\/\//.test(url)) api.post("/api/openurl", {url});
+  else toast("No online link for this record", "warn");
+});
+$("cite-append").addEventListener("click", async () => {
+  const bib = await getBibtex();
+  if (!bib) { toast("Could not build a BibTeX entry", "err"); return; }
+  const r = await api.post("/api/cite/append", {bibtex: bib});
+  if (r.error) { toast(r.error, "err"); return; }
+  toast(r.duplicate ? ("Already in references.bib (" + r.key + ")")
+        : ("Added " + (r.key || "entry") + " to references.bib"));
+  loadTree();
+});
+
+/* ================= search in files ================= */
+$("filestab").addEventListener("click", () => setSideTab("files"));
+$("searchtab").addEventListener("click", () => setSideTab("search"));
+function setSideTab(which) {
+  $("filestab").classList.toggle("active", which === "files");
+  $("searchtab").classList.toggle("active", which === "search");
+  $("treewrap").classList.toggle("show", which === "files");
+  $("searchwrap").classList.toggle("show", which === "search");
+  if (which === "search") $("searchbox").focus();
+}
+$("searchbox").addEventListener("keydown", ev => {
+  if (ev.key === "Enter") runSearch();
+});
+async function runSearch() {
+  const q = $("searchbox").value.trim();
+  if (q.length < 2) { $("searchinfo").textContent = "Type at least 2 characters."; return; }
+  $("searchinfo").textContent = "Searching…";
+  $("searchresults").innerHTML = "";
+  const data = await api.get("/api/search?q=" + encodeURIComponent(q));
+  const matches = data.matches || [];
+  $("searchinfo").textContent = matches.length
+    ? matches.length + " matches" + (data.truncated ? " (truncated)" : "")
+    : "No matches.";
+  let lastFile = null;
+  for (const m of matches) {
+    if (m.file !== lastFile) {
+      lastFile = m.file;
+      const fh = document.createElement("div");
+      fh.className = "sr-file"; fh.textContent = m.file; fh.title = m.file;
+      $("searchresults").appendChild(fh);
+    }
+    const row = document.createElement("div");
+    row.className = "sr-hit";
+    row.innerHTML = '<span class="ln"></span><span class="tx"></span>';
+    row.querySelector(".ln").textContent = m.line;
+    row.querySelector(".tx").textContent = m.text;
+    row.addEventListener("click", async () => {
+      await openFile(state.root + "\\" + m.file);
+      setTimeout(() => goToLine(m.line), 60);
+    });
+    $("searchresults").appendChild(row);
+  }
+}
+
+/* ================= pane resizing ================= */
+function initResizers() {
+  const app = $("app");
+  const saved = JSON.parse(localStorage.getItem("wb-layout") || "{}");
+  let left = saved.left || 240, rightW = saved.right || 460, dockH = saved.dock || 220;
+  const apply = () => {
+    app.style.gridTemplateColumns = left + "px 5px 1fr 5px " + rightW + "px";
+    $("dock").style.height = dockH + "px";
+    localStorage.setItem("wb-layout", JSON.stringify({left, right: rightW, dock: dockH}));
+  };
+  apply();
+  const drag = (el, onMove) => {
+    el.addEventListener("pointerdown", ev => {
+      ev.preventDefault();
+      el.setPointerCapture(ev.pointerId);
+      const move = e => { onMove(e); apply(); };
+      const up = () => {
+        el.removeEventListener("pointermove", move);
+        el.removeEventListener("pointerup", up);
+      };
+      el.addEventListener("pointermove", move);
+      el.addEventListener("pointerup", up);
+    });
+  };
+  drag($("gl"), e => { left = Math.max(150, Math.min(e.clientX, innerWidth - 500)); });
+  drag($("gr"), e => { rightW = Math.max(240, Math.min(innerWidth - e.clientX, innerWidth - 500)); });
+  drag($("dockgrip"), e => { dockH = Math.max(80, Math.min(innerHeight - e.clientY, innerHeight - 200)); });
+}
+initResizers();
+
+/* ================= global keys ================= */
+document.addEventListener("keydown", ev => {
+  const mod = ev.ctrlKey || ev.metaKey;
+  if (mod && ev.shiftKey && ev.key.toLowerCase() === "s") { ev.preventDefault(); gitSync(); }
+  else if (mod && !ev.shiftKey && ev.key.toLowerCase() === "s") { ev.preventDefault(); saveActive(); }
+  else if (mod && ev.key.toLowerCase() === "b") { ev.preventDefault(); compileActive(); }
+  else if (mod && !ev.shiftKey && ev.key.toLowerCase() === "p") { ev.preventDefault(); openQuickOpen(); }
+  else if (mod && ev.shiftKey && ev.key.toLowerCase() === "f") { ev.preventDefault(); setSideTab("search"); }
+  else if (mod && ev.shiftKey && ev.key.toLowerCase() === "k") { ev.preventDefault(); openCite(); }
+  else if (mod && ev.shiftKey && ev.key.toLowerCase() === "e") { ev.preventDefault(); exportDocx(); }
+  else if (mod && ev.shiftKey && ev.key.toLowerCase() === "o") { ev.preventDefault(); openConnect(); }
+  else if (mod && ev.key === "`") { ev.preventDefault(); $("dock").classList.toggle("closed"); }
+  else if (mod && ev.key === ",") { ev.preventDefault(); $("setbtn").click(); }
+  else if (ev.key === "Escape") {
+    closeMenus();
+    cancelConfirm();
+    if ($("settings-ov").classList.contains("open"))
+      applyAccent(state.settings.accent || "clay");   // revert live preview
+    for (const id of ["qo-ov", "prompt-ov", "settings-ov", "cite-ov", "connect-ov"])
+      $(id).classList.remove("open");
+    if (state.root) $("picker-ov").classList.remove("open");
+  }
+});
+window.addEventListener("beforeunload", ev => {
+  if (dirtyTabs().length) { ev.preventDefault(); ev.returnValue = ""; }
+});
+
+/* ================= pomodoro focus timer ================= */
+const pomo = {
+  running: false, phase: "focus", remaining: 25 * 60, count: 0,
+  focusMin: 25, breakMin: 5, tick: null,
+};
+(function loadPomo() {
+  try {
+    const s = JSON.parse(localStorage.getItem("wb-pomo") || "{}");
+    pomo.focusMin = s.focusMin || 25;
+    pomo.breakMin = s.breakMin || 5;
+    pomo.count = s.count || 0;
+    pomo.remaining = pomo.focusMin * 60;
+  } catch (e) {}
+})();
+function pomoSave() {
+  localStorage.setItem("wb-pomo", JSON.stringify(
+    {focusMin: pomo.focusMin, breakMin: pomo.breakMin, count: pomo.count}));
+}
+function pomoRender() {
+  const m = Math.floor(pomo.remaining / 60), s = pomo.remaining % 60;
+  $("pomo-time").textContent = (m < 10 ? "0" : "") + m + ":" + (s < 10 ? "0" : "") + s;
+  $("pomo-toggle").classList.toggle("running", pomo.running);
+  $("pomo-toggle").classList.toggle("breakphase", pomo.phase === "break");
+  $("pomo-phase").textContent = pomo.phase === "focus" ? "Focus" : "Break";
+  $("pomo-phase").style.color = pomo.phase === "focus" ? "var(--clay)" : "var(--ok)";
+  $("pomo-count").textContent = pomo.count;
+  $("pomo-focus").value = pomo.focusMin;
+  $("pomo-break").value = pomo.breakMin;
+  document.title = pomo.running
+    ? "🍅 " + $("pomo-time").textContent + " · Beacon"
+    : "Beacon";
+}
+function pomoBeep() {
+  try {
+    const ac = new (window.AudioContext || window.webkitAudioContext)();
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.connect(g); g.connect(ac.destination);
+    o.frequency.value = 660; g.gain.value = 0.14;
+    o.start();
+    g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + 0.6);
+    o.stop(ac.currentTime + 0.6);
+  } catch (e) {}
+}
+function pomoStart() {
+  if (pomo.running) return;
+  pomo.running = true;
+  pomo.tick = setInterval(() => {
+    pomo.remaining--;
+    if (pomo.remaining <= 0) {
+      pomoBeep();
+      if (pomo.phase === "focus") {
+        pomo.count++; pomo.phase = "break"; pomo.remaining = pomo.breakMin * 60;
+        toast("Focus session done. Take a " + pomo.breakMin + " min break.", "", 5000);
+      } else {
+        pomo.phase = "focus"; pomo.remaining = pomo.focusMin * 60;
+        toast("Break over. Back to focus.", "", 5000);
+      }
+      pomoSave();
+    }
+    pomoRender();
+  }, 1000);
+  pomoRender();
+}
+function pomoPause() {
+  pomo.running = false;
+  if (pomo.tick) { clearInterval(pomo.tick); pomo.tick = null; }
+  pomoRender();
+}
+$("pomo-toggle").addEventListener("click", () => pomo.running ? pomoPause() : pomoStart());
+$("pomo-gear").addEventListener("click", ev => {
+  ev.stopPropagation();
+  const m = $("pomo-menu");
+  const open = m.classList.contains("open");
+  closeMenus();
+  if (!open) { m.classList.add("open"); }
+});
+$("pomo-focus").addEventListener("change", () => {
+  pomo.focusMin = Math.max(1, Math.min(120, parseInt($("pomo-focus").value, 10) || 25));
+  if (!pomo.running && pomo.phase === "focus") pomo.remaining = pomo.focusMin * 60;
+  pomoSave(); pomoRender();
+});
+$("pomo-break").addEventListener("change", () => {
+  pomo.breakMin = Math.max(1, Math.min(60, parseInt($("pomo-break").value, 10) || 5));
+  if (!pomo.running && pomo.phase === "break") pomo.remaining = pomo.breakMin * 60;
+  pomoSave(); pomoRender();
+});
+$("pomo-reset").addEventListener("click", () => {
+  pomoPause(); pomo.phase = "focus"; pomo.remaining = pomo.focusMin * 60; pomoRender();
+});
+pomoRender();
+
+/* ================= install as a desktop app ================= */
+// A service worker plus the manifest make the app installable. Installing it
+// gives the app its own Windows taskbar and Start menu icon (the RT logo),
+// which a plain browser window cannot have.
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("/sw.js").catch(() => {});
+}
+let deferredInstall = null;
+window.addEventListener("beforeinstallprompt", ev => {
+  ev.preventDefault();
+  deferredInstall = ev;
+  $("installbtn").style.display = "";
+});
+$("installbtn").addEventListener("click", async () => {
+  if (!deferredInstall) {
+    toast("Use the browser menu: Apps → Install this site as an app", "warn", 5000);
+    return;
+  }
+  deferredInstall.prompt();
+  const res = await deferredInstall.userChoice;
+  deferredInstall = null;
+  $("installbtn").style.display = "none";
+  if (res && res.outcome === "accepted") toast("Installed. Look for the app with its own icon on your taskbar.");
+});
+window.addEventListener("appinstalled", () => { $("installbtn").style.display = "none"; toast("App installed"); });
+
+boot();
+</script>
+</body>
+</html>

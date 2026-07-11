@@ -1,0 +1,41 @@
+# Saved state (personal paths, recent folders, Claude session ids, AND any
+# AI API keys you enter in Settings). Never commit this file.
+workbench_config.json
+workbench_config.json.bak
+workbench_config.json.tmp
+
+# Secrets, in case any are ever placed here. Belt and suspenders so an API
+# key can never be pushed to a public repository.
+*.key
+*.pem
+.env
+.env.*
+secrets.json
+*secret*
+
+# Python cache and local virtual environment
+__pycache__/
+*.pyc
+.venv/
+
+# LaTeX build artifacts
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz
+*.toc
+*.lof
+*.lot
+*.nav
+*.snm
+*.vrb
+*.run.xml
+*.bcf
+
+# OS cruft
+Thumbs.db
+desktop.ini
