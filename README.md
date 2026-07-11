@@ -63,7 +63,7 @@ Then launch the app.
 **Or from a terminal:**
 
 ```powershell
-python research_workbench.py
+python beacon.py
 ```
 
 Add `--no-browser` to start the server without opening a window.
@@ -131,7 +131,7 @@ Beacon runs a local server, so it is built to resist a hostile web page you migh
 ## Project layout
 
 ```
-research_workbench.py     Local HTTP server and all backend logic
+beacon.py                 Local HTTP server and all backend logic
 workbench.html            Single-page front end (HTML, CSS, vanilla JS)
 sw.js                     Service worker (makes the app installable)
 vendor/                   Bundled xterm.js terminal and marked.js markdown renderer
