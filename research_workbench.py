@@ -1838,7 +1838,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         source = q.get("source", "openalex")
         wtype = q.get("type", "all")
-        focus = q.get("focus", "")   # "ee" restricts to major power/EE venues
+        focus = q.get("focus", "")   # "ee" strict, "all" neutral, else boost EE first
         if source == "crossref":
             self.api_cite_search(q)
             return
@@ -1890,10 +1890,14 @@ class Handler(BaseHTTPRequestHandler):
                 "abstract": abstract[:700],
             })
         if focus == "ee":
+            # Strict: only major power/EE venues (IEEE, Elsevier, IET, and peers).
             items = [it for it in items if it["major"]]
+        elif focus == "all":
+            # Neutral: keep OpenAlex's own relevance order, no venue ranking.
+            pass
         else:
-            # Stable sort so major power/EE venues surface first while each
-            # group keeps OpenAlex's relevance order.
+            # Default "boost": stable sort so major power/EE venues surface first
+            # while each group keeps OpenAlex's relevance order.
             items.sort(key=lambda it: not it["major"])
         items = items[:18]
         # Correct author names against the authoritative publisher records.

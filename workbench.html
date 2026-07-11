@@ -112,7 +112,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 #recentbtn { background:var(--ink-700); border:1px solid var(--ink-600); border-left:none;
   border-radius:0 4px 4px 0; padding:3px 7px; color:var(--dim); font-size:10px; }
 #recentbtn:hover { color:var(--text); }
-.menu { position:absolute; z-index:60; min-width:190px; background:var(--ink-800);
+.menu { position:fixed; z-index:60; min-width:190px; background:var(--ink-800);
   border:1px solid var(--ink-600); border-radius:6px; box-shadow:0 10px 28px var(--shadow);
   padding:5px; display:none; }
 .menu.open { display:block; }
@@ -563,7 +563,7 @@ html[data-theme="light"] .overlay { background:rgba(70,60,40,.35); }
     <div id="dockbar">
       <button class="dtab active" data-d="term">Terminal</button>
       <button class="dtab" data-d="out">Output</button>
-      <button id="extterm" title="Open a real external terminal here (for interactive tools like claude, which the embedded terminal cannot run)">⤢ Real terminal</button>
+      <button id="extterm" title="Open a real external PowerShell window here (for interactive tools like claude, which the embedded terminal cannot run)">⤢ PowerShell</button>
       <button id="stopjob" title="Stop the running task" style="display:none">■ Stop</button>
       <button id="dockbtn" title="Toggle the panel (Ctrl+`)">▾</button>
     </div>
@@ -717,7 +717,8 @@ html[data-theme="light"] .overlay { background:rgba(70,60,40,.35); }
       </select>
       <label for="find-focus">Focus</label>
       <select id="find-focus">
-        <option value="">All venues (IEEE/Elsevier first)</option>
+        <option value="boost">IEEE &amp; Elsevier first</option>
+        <option value="all">All sources (no ranking)</option>
         <option value="ee">Power &amp; EE only (IEEE, Elsevier, IET)</option>
       </select>
     </div>
@@ -1908,7 +1909,7 @@ $("toolsbtn").addEventListener("click", ev => {
     m.appendChild(b);
   };
   add("Export LaTeX to Word (.docx)", exportDocx);
-  add("Open external terminal", () => api.post("/api/extterm", {}).then(r => r.error ? toast(r.error, "err") : toast("Opened a terminal")));
+  add("Open PowerShell window", () => api.post("/api/extterm", {}).then(r => r.error ? toast(r.error, "err") : toast("Opened PowerShell")));
   add("Reveal workspace in Explorer", () => { if (state.root) api.post("/api/reveal", {path: state.root}); });
   const rect = $("toolsbtn").getBoundingClientRect();
   openMenuAt(m, rect.left, rect.bottom + 4);
