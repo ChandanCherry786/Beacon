@@ -38,6 +38,14 @@ CONFIG_FILE = os.path.join(SCRIPT_DIR, "workbench_config.json")
 HTML_FILE = os.path.join(SCRIPT_DIR, "workbench.html")
 PORT = 8347
 
+# Application identity. Beacon is served locally, so the browser labels the
+# installed app by its origin (127.0.0.1); there is no signed publisher. These
+# constants carry the real author, version, and copyright for the software.
+APP_NAME = "Beacon"
+APP_VERSION = "1.0.0"
+APP_AUTHOR = "Chandan Chaudhary"
+APP_YEAR = "2026"
+
 # Public static assets, served without a token because the browser fetches
 # icons on its own and they expose no workspace data. favicon.ico is the
 # multi-resolution icon the Windows taskbar and title bar use.
@@ -118,6 +126,7 @@ DEFAULT_SETTINGS = {
     "openai_key": "",
     "gemini_key": "",
     "xai_key": "",
+    "writing_goal": 500,
 }
 ACCENTS = ("clay", "ocean", "forest", "violet", "gold")
 EDITOR_FONTS = ("Cascadia Mono", "Cascadia Code", "Consolas", "JetBrains Mono",
@@ -812,6 +821,109 @@ def format_bib_entry(e):
     return "\n".join(lines)
 
 
+# Line-level academic-prose checks. Each pattern flags a common weakness so a
+# draft can be tightened before review; the checks are advisory, not absolute.
+PROSE_CHECKS = [
+    ("em-dash", re.compile(r"—|(?<!-)---(?!-)")),
+    ("intensifier", re.compile(
+        r"\b(?:very|quite|fairly|rather|really|extremely|vast|relatively|"
+        r"remarkably|somewhat|arguably|clearly|obviously|drastically)\b", re.I)),
+    ("hedge/filler", re.compile(
+        r"\bit is important to note\b|\bin order to\b|\bit should be (?:noted|mentioned)\b|"
+        r"\bto the best of (?:the authors'?|our) knowledge\b|"
+        r"\bas far as (?:the authors|we) are aware\b|\bneedless to say\b", re.I)),
+    ("overclaim", re.compile(
+        r"\b(?:highly effective|is superior|prove[sd]? robustness|"
+        r"state[- ]of[- ]the[- ]art)\b", re.I)),
+    ("gerund clause", re.compile(
+        r",\s+(?:including|providing|causing|resulting|confirming|enabling|"
+        r"allowing|leading|yielding|producing)\b", re.I)),
+    ("duplicated word", re.compile(r"\b([A-Za-z]+)\s+\1\b", re.I)),
+    ("However start", re.compile(r"^\s*However,")),
+    ("possible passive", re.compile(
+        r"\b(?:is|are|was|were|be|been|being)\s+[a-z]+ed\b", re.I)),
+    ("exclamation", re.compile(r"!")),
+]
+
+
+def prose_issues(text, limit=600):
+    """Scan LaTeX prose line by line and return advisory writing issues as a
+    list of {line, kind, text}. Comment content is ignored, and lines without
+    at least two lowercase words are skipped so command markup is not flagged."""
+    issues = []
+    has_prose = re.compile(r"[a-z]{3,}\s+[a-z]{3,}")
+    for i, raw in enumerate(text.split("\n"), 1):
+        line = re.sub(r"(?<!\\)%.*", "", raw)
+        if not has_prose.search(line):
+            continue
+        snippet = line.strip()[:160]
+        for kind, rx in PROSE_CHECKS:
+            if rx.search(line):
+                issues.append({"line": i, "kind": kind, "text": snippet})
+                if len(issues) >= limit:
+                    return issues
+    return issues
+
+
+def parse_latex_log(text, main_name):
+    r"""Pull errors and warnings with line numbers out of a LaTeX .log. The
+    current input file is tracked through the log's parenthesis stack, so a
+    problem inside an \input section is attributed to that section rather than
+    the main document. File tokens are returned as written in the log; the
+    caller resolves them to workspace paths."""
+    file_exts = (".tex", ".sty", ".cls", ".def", ".cfg", ".fd", ".ltx",
+                 ".aux", ".bbl", ".out", ".toc", ".clo")
+    problems = []
+    stack = [main_name]
+    lines = text.split("\n")
+
+    def cur():
+        for f in reversed(stack):
+            if f and f.lower().endswith(".tex"):
+                return f
+        return main_name
+
+    for idx, line in enumerate(lines):
+        j, n = 0, len(line)
+        while j < n:
+            c = line[j]
+            if c == "(":
+                k = j + 1
+                while k < n and line[k] not in ' \t()[]{}"':
+                    k += 1
+                token = line[j + 1:k]
+                is_file = ("/" in token or "\\" in token
+                           or token.lower().endswith(file_exts))
+                stack.append(token if is_file else "")
+                j = k
+                continue
+            if c == ")" and len(stack) > 1:
+                stack.pop()
+            j += 1
+        if line.startswith("!"):
+            msg = line[1:].strip().rstrip(".")
+            ln = 0
+            for look in lines[idx + 1:idx + 8]:
+                lm = re.match(r"l\.(\d+)", look)
+                if lm:
+                    ln = int(lm.group(1))
+                    break
+            if msg:
+                problems.append({"f": cur(), "line": ln, "kind": "error", "text": msg[:200]})
+            continue
+        wm = re.search(r"(?:LaTeX|Package|Class)\b[^:]*Warning:\s*(.*)", line)
+        if wm:
+            lm = re.search(r"on input line (\d+)", line)
+            problems.append({"f": cur(), "line": int(lm.group(1)) if lm else 0,
+                             "kind": "warning", "text": wm.group(1).strip()[:200]})
+            continue
+        bm = re.match(r"(?:Overfull|Underfull) \\[hv]box.*?at lines? (\d+)", line)
+        if bm:
+            problems.append({"f": cur(), "line": int(bm.group(1)),
+                             "kind": "warning", "text": line.strip()[:200]})
+    return problems
+
+
 def run_step(job_id, cmd, cwd, timeout, on_line=None):
     """Run one command to completion inside a job, streaming its output and
     honoring cancellation. Returns the exit code, or -1 on failure/timeout."""
@@ -1432,6 +1544,8 @@ class Handler(BaseHTTPRequestHandler):
                     "open_tabs": cfg.get("open_tabs", []),
                     "compilers": list(COMPILERS.keys()),
                     "pty": HAS_PTY,
+                    "app": {"name": APP_NAME, "version": APP_VERSION,
+                            "author": APP_AUTHOR, "year": APP_YEAR},
                 })
             elif route == "/api/browse":
                 self.api_browse(q)
@@ -1743,6 +1857,16 @@ class Handler(BaseHTTPRequestHandler):
                 self.api_citekeys(body)
             elif route == "/api/citecheck":
                 self.api_citecheck(body)
+            elif route == "/api/labels":
+                self.api_labels(body)
+            elif route == "/api/todos":
+                self.api_todos(body)
+            elif route == "/api/prose":
+                self.api_prose(body)
+            elif route == "/api/compilelog":
+                self.api_compilelog(body)
+            elif route == "/api/writingstats":
+                self.api_writingstats(body)
             elif route == "/api/gitop":
                 self.api_gitop(body)
             elif route == "/api/git/connect":
@@ -1833,6 +1957,10 @@ class Handler(BaseHTTPRequestHandler):
             settings["font_size"] = max(9, min(22, int(settings.get("font_size", 12))))
         except (TypeError, ValueError):
             settings["font_size"] = 12
+        try:
+            settings["writing_goal"] = max(0, min(100000, int(settings.get("writing_goal", 500))))
+        except (TypeError, ValueError):
+            settings["writing_goal"] = 500
         settings["autosave"] = bool(settings.get("autosave"))
         settings["auto_install"] = bool(settings.get("auto_install"))
         am = settings.get("ai_model") or ""
@@ -2262,10 +2390,170 @@ class Handler(BaseHTTPRequestHandler):
                 for e in parsed[1]:
                     if e["key"]:
                         defined.add(e["key"])
+        labels = set(m.group(1).strip()
+                     for m in re.finditer(r"\\label\{([^}]+)\}", text))
+        refs = set()
+        ref_re = re.compile(r"\\(?:eqref|autoref|pageref|nameref|vref|labelcref|"
+                            r"cpageref|cref|Cref|ref)\*?\s*\{([^}]*)\}")
+        for m in ref_re.finditer(text):
+            for k in m.group(1).split(","):
+                k = k.strip()
+                if k:
+                    refs.add(k)
         self._json({"ok": True, "file": os.path.basename(tex), "note": note,
                     "used": len(used), "defined": len(defined),
                     "undefined": sorted(used - defined),
-                    "uncited": sorted(defined - used)})
+                    "uncited": sorted(defined - used),
+                    "labels": len(labels), "refs": len(refs),
+                    "undefined_refs": sorted(refs - labels),
+                    "unused_labels": sorted(labels - refs)})
+
+    def api_labels(self, body):
+        r"""Return every \label defined across the workspace .tex files, for
+        \ref/\eqref/\cref autocompletion."""
+        root = get_root()
+        if not root:
+            self._json({"labels": []})
+            return
+        labels, seen = [], set()
+        lab_re = re.compile(r"\\label\{([^}]+)\}")
+        for fp in walk_workspace(root):
+            if not fp.lower().endswith(".tex"):
+                continue
+            try:
+                with open(fp, "r", encoding="utf-8", errors="replace") as f:
+                    text = re.sub(r"(?<!\\)%.*", "", f.read())
+            except OSError:
+                continue
+            for m in lab_re.finditer(text):
+                k = m.group(1).strip()
+                if k and k not in seen:
+                    seen.add(k)
+                    labels.append(k)
+        labels.sort(key=str.lower)
+        self._json({"labels": labels})
+
+    def api_todos(self, body):
+        r"""List TODO/FIXME/XXX/HACK/BUG markers and \todo notes across the
+        workspace source files, with file and line, for a jump-to task list."""
+        root = get_root()
+        if not root:
+            self._json({"todos": []})
+            return
+        marker = re.compile(r"\b(?:TODO|FIXME|XXX|HACK|BUG)\b|\\(?:todo|fixme)\b")
+        out = []
+        for fp in walk_workspace(root):
+            if not fp.lower().endswith((".tex", ".py", ".md", ".bib", ".txt")):
+                continue
+            try:
+                with open(fp, "r", encoding="utf-8", errors="replace") as f:
+                    for i, line in enumerate(f, 1):
+                        if marker.search(line):
+                            out.append({"file": os.path.relpath(fp, root),
+                                        "line": i, "text": line.strip()[:200]})
+                            if len(out) >= 500:
+                                break
+            except OSError:
+                continue
+            if len(out) >= 500:
+                break
+        self._json({"todos": out})
+
+    def api_prose(self, body):
+        """Run the advisory academic-prose checks over a LaTeX document and
+        return the flagged lines."""
+        tex = body.get("path", "")
+        if not path_allowed(tex) or not tex.lower().endswith(".tex"):
+            self._json({"error": "select a .tex file"}, 400)
+            return
+        try:
+            with open(tex, "r", encoding="utf-8", errors="replace") as f:
+                text = f.read()
+        except OSError as e:
+            self._json({"error": str(e)}, 500)
+            return
+        self._json({"ok": True, "file": os.path.basename(tex),
+                    "issues": prose_issues(text)})
+
+    def api_compilelog(self, body):
+        """Parse the .log from the last compile into a list of errors and
+        warnings with file and line, for a clickable problems view."""
+        tex = body.get("path", "")
+        if not path_allowed(tex) or not tex.lower().endswith(".tex"):
+            self._json({"error": "select a .tex file"}, 400)
+            return
+        tex, note = resolve_main_tex(tex)
+        log_path = os.path.splitext(tex)[0] + ".log"
+        if not os.path.isfile(log_path):
+            self._json({"ok": True, "problems": [], "errors": 0, "warnings": 0})
+            return
+        try:
+            with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+                log = f.read()
+        except OSError as e:
+            self._json({"error": str(e)}, 500)
+            return
+        folder = os.path.dirname(tex)
+        root = get_root() or folder
+        main_rel = os.path.relpath(tex, root)
+        seen, problems = set(), []
+        for p in parse_latex_log(log, os.path.basename(tex)):
+            rel = main_rel
+            tok = p["f"]
+            if tok:
+                cand = os.path.normpath(os.path.join(folder, tok))
+                if path_allowed(cand) and os.path.isfile(cand):
+                    rel = os.path.relpath(cand, root)
+            key = (rel, p["line"], p["text"])
+            if key in seen:
+                continue
+            seen.add(key)
+            problems.append({"file": rel, "line": p["line"] or 1,
+                             "kind": p["kind"], "text": p["text"]})
+        errors = sum(1 for p in problems if p["kind"] == "error")
+        self._json({"ok": True, "note": note, "problems": problems[:300],
+                    "errors": errors, "warnings": len(problems) - errors})
+
+    def api_writingstats(self, body):
+        """Record and report writing progress: the current total word count of
+        the workspace .tex files, how many words have been added today against
+        a daily goal, and a short recent history."""
+        import datetime
+        root = get_root()
+        if not root:
+            self._json({"error": "open a workspace first"}, 400)
+            return
+        total = 0
+        for fp in walk_workspace(root):
+            if fp.lower().endswith(".tex"):
+                try:
+                    with open(fp, "r", encoding="utf-8", errors="replace") as f:
+                        total += latex_word_count(f.read())["words"]
+                except OSError:
+                    pass
+        today = datetime.date.today().isoformat()
+
+        def mut(cfg):
+            ws = cfg.setdefault("writing_stats", {}).setdefault(root, {})
+            day = ws.get(today)
+            if day is None:
+                ws[today] = {"baseline": total, "latest": total}
+            else:
+                if total < day["baseline"]:
+                    day["baseline"] = total
+                day["latest"] = total
+            for old in sorted(ws)[:-60]:
+                ws.pop(old, None)
+            return dict(ws)
+
+        ws = update_config(mut)
+        goal = int(get_settings().get("writing_goal", 500) or 500)
+        written = max(0, total - ws[today]["baseline"])
+        history = [{"date": d,
+                    "written": max(0, ws[d].get("latest", 0) - ws[d].get("baseline", 0))}
+                   for d in sorted(ws)[-7:]]
+        self._json({"ok": True, "total": total, "written_today": written,
+                    "goal": goal, "history": history})
 
     def api_find_search(self, q):
         """Keyword search over scholarly works and books. OpenAlex is the
@@ -2764,7 +3052,7 @@ def main():
         return
     if "--no-browser" not in sys.argv:
         threading.Thread(target=open_window, daemon=True).start()
-    print(f"Beacon on http://127.0.0.1:{PORT}")
+    print(f"Beacon {APP_VERSION} (c) {APP_YEAR} {APP_AUTHOR} - http://127.0.0.1:{PORT}")
     server.serve_forever()
 
 

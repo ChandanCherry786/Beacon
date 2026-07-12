@@ -10,6 +10,10 @@
 <link rel="apple-touch-icon" href="/logo-180.png">
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#16181D">
+<meta name="author" content="Chandan Chaudhary">
+<meta name="description" content="Beacon - a local research IDE for LaTeX and Python.">
+<meta name="copyright" content="(c) 2026 Chandan Chaudhary">
+<meta name="version" content="1.0.0">
 <link rel="stylesheet" href="/vendor/xterm.css">
 <script src="/vendor/xterm.js"></script>
 <script src="/vendor/xterm-addon-fit.js"></script>
@@ -498,6 +502,7 @@ html[data-theme="light"] .overlay { background:rgba(70,60,40,.35); }
     <div id="toolsbadge" style="position:relative">
       <button class="actbtn" id="toolsbtn" title="Tools">Tools ▾</button>
       <div class="menu" id="toolsmenu" role="menu"></div>
+      <div class="menu" id="snippetmenu" role="menu"></div>
     </div>
     <button class="iconbtn" id="themebtn" title="Switch between dark and light theme">◐</button>
     <button class="iconbtn" id="setbtn" title="Settings">⚙</button>
@@ -630,6 +635,8 @@ html[data-theme="light"] .overlay { background:rgba(70,60,40,.35); }
     <div class="set-hint">Used by the Run button and put first on PATH for the terminal.</div>
     <div class="set-row"><label for="set-font">Editor font size</label>
       <input type="number" id="set-font" min="9" max="22"></div>
+    <div class="set-row"><label for="set-goal">Daily writing goal (words)</label>
+      <input type="number" id="set-goal" min="0" max="100000" step="50"></div>
     <div class="set-row"><label for="set-autoinstall">Auto-install missing LaTeX packages</label>
       <input type="checkbox" id="set-autoinstall"></div>
     <div class="set-row"><label for="set-autosave">Auto-save modified files every 30 s</label>
@@ -648,6 +655,7 @@ html[data-theme="light"] .overlay { background:rgba(70,60,40,.35); }
         <button class="btn-primary" id="upd-apply" style="display:none">Update now</button>
         <span id="upd-status" class="set-hint" style="margin:0"></span>
       </div></div>
+    <div class="set-hint" id="about-line" style="padding-top:8px;border-top:1px solid var(--ink-700);margin-top:6px">Beacon v1.0.0 &middot; &copy; 2026 Chandan Chaudhary</div>
     <footer>
       <button class="actbtn" id="set-cancel">Cancel</button>
       <button class="btn-primary" id="set-save">Save settings</button>
@@ -740,6 +748,7 @@ html[data-theme="light"] .overlay { background:rgba(70,60,40,.35); }
         <div style="flex:1"></div>
         <button class="actbtn" id="cite-copy">Copy</button>
         <button class="actbtn" id="cite-append">＋ references.bib</button>
+        <button class="actbtn" id="cite-insert" title="Add to references.bib and insert \cite at the cursor">＋ \cite in editor</button>
         <button class="actbtn" id="cite-open">Open paper ↗</button>
       </div>
       <textarea id="cite-out" readonly spellcheck="false"></textarea>
@@ -773,13 +782,19 @@ const state = {
   root:"", tabs:[], active:-1, lastPdf:null, gitInfo:null,
   termES:null, chatBusy:false, recents:[], settings:{},
   expanded:new Set(), rootHistory:[], qoIndex:null, qoSel:0, autosaveTimer:null,
-  citeKeys:[],
+  citeKeys:[], labels:[], compileProblems:[],
 };
 async function loadCiteKeys() {
   try {
     const r = await api.post("/api/citekeys", {});
     state.citeKeys = (r && r.keys) || [];
   } catch (e) { state.citeKeys = []; }
+}
+async function loadLabels() {
+  try {
+    const r = await api.post("/api/labels", {});
+    state.labels = (r && r.labels) || [];
+  } catch (e) { state.labels = []; }
 }
 
 /* ================= helpers ================= */
@@ -904,6 +919,7 @@ $("setbtn").addEventListener("click", () => {
   $("set-compiler").value = s.compiler || "latexmk";
   $("set-python").value = s.python_path || "";
   $("set-font").value = s.font_size || 12;
+  $("set-goal").value = s.writing_goal != null ? s.writing_goal : 500;
   $("set-autosave").checked = !!s.autosave;
   $("set-autoinstall").checked = s.auto_install !== false;
   const ks = (s.keys_set) || {};
@@ -924,6 +940,7 @@ $("set-save").addEventListener("click", async () => {
     compiler: $("set-compiler").value,
     python_path: $("set-python").value.trim(),
     font_size: parseInt($("set-font").value, 10) || 12,
+    writing_goal: parseInt($("set-goal").value, 10) || 0,
     autosave: $("set-autosave").checked,
     auto_install: $("set-autoinstall").checked,
     openai_key: $("set-openai").value,
@@ -973,6 +990,12 @@ async function boot() {
   const cfg = await api.get("/api/config");
   state.recents = cfg.recents || [];
   state.hasPty = !!cfg.pty && typeof Terminal !== "undefined";
+  if (cfg.app) {
+    state.app = cfg.app;
+    $("about-line").innerHTML = cfg.app.name + " v" + cfg.app.version +
+      " &middot; &copy; " + cfg.app.year + " " + cfg.app.author;
+    document.title = cfg.app.name + " v" + cfg.app.version;
+  }
   applySettings(cfg.settings || {});
   initAiModels();
   if (cfg.root) {
@@ -1007,6 +1030,8 @@ async function setRoot(root, push) {
   renderTabs(); showPane(); persistTabs();
   await loadTree();
   loadCiteKeys();
+  loadLabels();
+  recordWritingStats(true);
   restartTerminal(true);
   updateGit(root);
 }
@@ -1547,6 +1572,18 @@ function computeAc() {
         }));
       return items.length ? showAc(pos - partial.length, items) : hideAc();
     }
+    // Cross-reference labels inside \ref{…}, \eqref{…}, \cref{…}, and the rest.
+    const rm = before.match(/\\(?:eqref|autoref|pageref|nameref|vref|labelcref|cpageref|cref|Cref|ref)\*?\s*\{([^}]*)$/);
+    if (rm) {
+      const frag = rm[1];
+      const partial = frag.slice(frag.lastIndexOf(",") + 1).replace(/^\s+/, "");
+      const q = partial.toLowerCase();
+      const buf = [...ed.value.matchAll(/\\label\{([^}]+)\}/g)].map(x => x[1].trim());
+      const all = Array.from(new Set([...buf, ...state.labels]));
+      const items = all.filter(l => l.toLowerCase().includes(q)).sort()
+        .slice(0, 40).map(l => ({label: l, insert: l}));
+      return items.length ? showAc(pos - partial.length, items) : hideAc();
+    }
     let m = before.match(/\\(?:begin|end)\{([a-zA-Z*]*)$/);
     if (m) {
       const w = m[1];
@@ -1710,6 +1747,7 @@ async function saveTab(t, force) {
   t.dirty = false; t.mtime = r.mtime; renderTabs();
   if (t === state.tabs[state.active]) $("st-save").textContent = "saved";
   if (t.path.toLowerCase().endsWith(".bib")) loadCiteKeys();
+  if (t.path.toLowerCase().endsWith(".tex")) { loadLabels(); recordWritingStats(); }
 }
 async function saveActive(force) {
   syncActive();
@@ -1728,6 +1766,45 @@ function goToLine(line) {
   const lh = (state.settings.font_size || 12) * 1.55;
   $("editor").scrollTop = Math.max(0, (line - 6) * lh);
   syncScroll(); updatePos();
+}
+/* Insert text at the editor caret. If the text contains an empty {} the caret
+   lands inside it; otherwise it lands at the end of the insertion. Returns
+   false when no editable text tab is active. */
+function insertAtCursor(text) {
+  const t = state.tabs[state.active];
+  if (!t || t.kind !== "text") { toast("Open a text file to insert into", "err"); return false; }
+  const ed = $("editor");
+  ed.focus();
+  const start = ed.selectionStart;
+  document.execCommand("insertText", false, text);
+  const brace = text.indexOf("{}");
+  if (brace >= 0) { const c = start + brace + 1; ed.setSelectionRange(c, c); }
+  syncActive(); repaint();
+  return true;
+}
+const SNIPPETS = [
+  ["Figure", "\\begin{figure}[htbp]\n  \\centering\n  \\includegraphics[width=\\linewidth]{}\n  \\caption{}\n  \\label{fig:}\n\\end{figure}\n"],
+  ["Table", "\\begin{table}[htbp]\n  \\centering\n  \\caption{}\n  \\label{tab:}\n  \\begin{tabular}{lcc}\n    \\toprule\n    Column & Column & Column \\\\\n    \\midrule\n     &  & \\\\\n    \\bottomrule\n  \\end{tabular}\n\\end{table}\n"],
+  ["Equation", "\\begin{equation}\n  \\label{eq:}\n  \n\\end{equation}\n"],
+  ["Aligned equations", "\\begin{align}\n  \n\\end{align}\n"],
+  ["Itemize list", "\\begin{itemize}\n  \\item \n\\end{itemize}\n"],
+  ["Enumerate list", "\\begin{enumerate}\n  \\item \n\\end{enumerate}\n"],
+  ["Algorithm", "\\begin{algorithm}[htbp]\n  \\caption{}\n  \\label{alg:}\n  \\begin{algorithmic}[1]\n    \\State \n  \\end{algorithmic}\n\\end{algorithm}\n"],
+  ["Subfigures (two)", "\\begin{figure}[htbp]\n  \\centering\n  \\begin{subfigure}{0.48\\linewidth}\n    \\includegraphics[width=\\linewidth]{}\n    \\caption{}\\label{fig:a}\n  \\end{subfigure}\\hfill\n  \\begin{subfigure}{0.48\\linewidth}\n    \\includegraphics[width=\\linewidth]{}\n    \\caption{}\\label{fig:b}\n  \\end{subfigure}\n  \\caption{}\\label{fig:both}\n\\end{figure}\n"],
+];
+function openSnippetMenu() {
+  const t = state.tabs[state.active];
+  if (!t || t.kind !== "text" || t.lang !== "latex") { toast("Open a .tex file first", "err"); return; }
+  const m = $("snippetmenu");
+  m.innerHTML = "";
+  SNIPPETS.forEach(([label, body]) => {
+    const b = document.createElement("button");
+    b.textContent = label;
+    b.addEventListener("click", () => { closeMenus(); insertAtCursor(body); });
+    m.appendChild(b);
+  });
+  const rect = $("toolsbtn").getBoundingClientRect();
+  openMenuAt(m, rect.left, rect.bottom + 4);
 }
 
 /* ================= git ================= */
@@ -1938,7 +2015,48 @@ async function compileActive() {
       toast("Compile failed, see Output", "err", 5000);
     }
     updateGit(t.path);
+    loadCompileProblems(t.path, rc);
   });
+}
+async function loadCompileProblems(path, rc) {
+  const r = await api.post("/api/compilelog", {path});
+  if (!r || r.error) return;
+  state.compileProblems = r.problems || [];
+  if (!state.compileProblems.length) return;
+  // On a failed build, surface the clickable problem list right away; on a
+  // clean build just note the warning count so the preview is not interrupted.
+  if (rc !== 0 || r.errors) showCompileProblems();
+  else toast(r.warnings + " compile warning(s) — Tools ▸ Show compile problems", "warn", 4000);
+}
+function showCompileProblems() {
+  const p = state.compileProblems || [];
+  if (!p.length) { toast("No compile problems"); return; }
+  const errs = p.filter(x => x.kind === "error").length;
+  showHitList(p.length + " compile problem(s): " + errs + " error(s), " + (p.length - errs) + " warning(s)",
+    p.map(x => ({file: x.file, line: x.line, text: "[" + x.kind + "] " + x.text})));
+}
+async function writingProgress() {
+  const r = await api.post("/api/writingstats", {});
+  if (r.error) { toast(r.error, "err", 6000); return; }
+  showDock("out");
+  const pct = r.goal > 0 ? Math.min(100, Math.round(r.written_today / r.goal * 100)) : 0;
+  const filled = Math.round(pct / 10);
+  const bar = "■".repeat(filled) + "□".repeat(10 - filled);
+  logJob("info", "── writing progress ──");
+  logJob("", "today: " + r.written_today.toLocaleString() + " words written"
+    + (r.goal > 0 ? "  toward a " + r.goal.toLocaleString() + " goal  " + bar + " " + pct + "%" : ""));
+  logJob("", "document total: " + r.total.toLocaleString() + " words across the workspace .tex files");
+  if (r.history && r.history.length)
+    logJob("", "recent days: " + r.history.map(h => h.date.slice(5) + " " + h.written).join("   ·   "));
+  logJob("info", "set your daily goal in Settings (gear icon)");
+  toast(r.written_today.toLocaleString() + " words today" + (r.goal > 0 ? " (" + pct + "% of goal)" : ""));
+}
+let statsThrottle = 0;
+function recordWritingStats(force) {
+  const now = Date.now();
+  if (!force && now - statsThrottle < 15000) return;
+  statsThrottle = now;
+  api.post("/api/writingstats", {}).catch(() => {});
 }
 $("runbtn").addEventListener("click", async () => {
   const t = state.tabs[state.active];
@@ -1963,7 +2081,12 @@ $("toolsbtn").addEventListener("click", ev => {
     m.appendChild(b);
   };
   add("Word count (LaTeX)", wordCount);
-  add("Check citations (.tex vs .bib)", citeCheck);
+  add("Writing progress", writingProgress);
+  add("Check citations & references", citeCheck);
+  add("Prose check (LaTeX)", proseCheck);
+  add("List TODOs & notes", listTodos);
+  add("Show compile problems", showCompileProblems);
+  add("Insert LaTeX snippet…", openSnippetMenu);
   add("Format Python file (Ruff/Black)", formatPython);
   m.insertAdjacentHTML("beforeend", '<div class="sep"></div>');
   add("Export LaTeX to Word (.docx)", exportDocx);
@@ -2036,10 +2159,20 @@ async function citeCheck() {
     logJob("info", r.uncited.length + " uncited (.bib entry never cited):");
     r.uncited.forEach(k => logJob("", "  · " + k));
   } else logJob("", "no uncited entries");
-  toast(r.undefined.length
-    ? r.undefined.length + " undefined citation(s) — see Output"
-    : "Citations OK — " + r.used + " used, " + r.uncited.length + " unused",
-    r.undefined.length ? "err" : undefined, 5000);
+  logJob("", r.refs + " cross-references used, " + r.labels + " labels defined");
+  if (r.undefined_refs.length) {
+    logJob("err", r.undefined_refs.length + " undefined (\\ref with no matching \\label):");
+    r.undefined_refs.forEach(k => logJob("err", "  ? " + k));
+  } else logJob("", "no undefined references");
+  if (r.unused_labels.length) {
+    logJob("info", r.unused_labels.length + " unused (\\label never referenced):");
+    r.unused_labels.forEach(k => logJob("", "  · " + k));
+  } else logJob("", "no unused labels");
+  const problems = r.undefined.length + r.undefined_refs.length;
+  toast(problems
+    ? problems + " undefined citation/reference(s) — see Output"
+    : "Citations & references OK",
+    problems ? "err" : undefined, 5000);
 }
 async function cleanBuild() {
   if (!state.root) { toast("Open a workspace first", "err"); return; }
@@ -2775,7 +2908,22 @@ $("cite-append").addEventListener("click", async () => {
   if (r.error) { toast(r.error, "err"); return; }
   toast(r.duplicate ? ("Already in references.bib (" + r.key + ")")
         : ("Added " + (r.key || "entry") + " to references.bib"));
-  loadTree();
+  loadTree(); loadCiteKeys();
+});
+$("cite-insert").addEventListener("click", async () => {
+  const t = state.tabs[state.active];
+  if (!t || t.kind !== "text" || !t.path.toLowerCase().endsWith(".tex")) {
+    toast("Open a .tex file to insert a citation into", "err"); return;
+  }
+  const bib = await getBibtex();
+  if (!bib) { toast("Could not build a BibTeX entry", "err"); return; }
+  const r = await api.post("/api/cite/append", {bibtex: bib});
+  if (r.error) { toast(r.error, "err"); return; }
+  if (!r.key) { toast("Added to references.bib, but found no key to cite", "warn"); loadTree(); loadCiteKeys(); return; }
+  $("cite-ov").classList.remove("open");
+  insertAtCursor("\\cite{" + r.key + "}");
+  loadTree(); loadCiteKeys();
+  toast((r.duplicate ? "Cited " : "Added & cited ") + r.key);
 });
 
 /* ================= search in files ================= */
@@ -2844,18 +2992,14 @@ function renderOutline() {
 $("searchbox").addEventListener("keydown", ev => {
   if (ev.key === "Enter") runSearch();
 });
-async function runSearch() {
-  const q = $("searchbox").value.trim();
-  if (q.length < 2) { $("searchinfo").textContent = "Type at least 2 characters."; return; }
-  $("searchinfo").textContent = "Searching…";
+/* Render a list of {file, line, text} hits in the Search panel, grouped by
+   file, each row jumping to that line. Shared by search, TODOs, and prose. */
+function showHitList(infoText, hits) {
+  setSideTab("search");
+  $("searchinfo").textContent = infoText;
   $("searchresults").innerHTML = "";
-  const data = await api.get("/api/search?q=" + encodeURIComponent(q));
-  const matches = data.matches || [];
-  $("searchinfo").textContent = matches.length
-    ? matches.length + " matches" + (data.truncated ? " (truncated)" : "")
-    : "No matches.";
   let lastFile = null;
-  for (const m of matches) {
+  for (const m of hits) {
     if (m.file !== lastFile) {
       lastFile = m.file;
       const fh = document.createElement("div");
@@ -2873,6 +3017,37 @@ async function runSearch() {
     });
     $("searchresults").appendChild(row);
   }
+}
+async function runSearch() {
+  const q = $("searchbox").value.trim();
+  if (q.length < 2) { $("searchinfo").textContent = "Type at least 2 characters."; return; }
+  $("searchinfo").textContent = "Searching…";
+  $("searchresults").innerHTML = "";
+  const data = await api.get("/api/search?q=" + encodeURIComponent(q));
+  const matches = data.matches || [];
+  showHitList(matches.length
+    ? matches.length + " matches" + (data.truncated ? " (truncated)" : "")
+    : "No matches.", matches);
+}
+async function listTodos() {
+  if (!state.root) { toast("Open a workspace first", "err"); return; }
+  const r = await api.post("/api/todos", {});
+  if (r.error) { toast(r.error, "err", 6000); return; }
+  const todos = r.todos || [];
+  showHitList(todos.length ? todos.length + " TODO/FIXME notes" : "No TODO or FIXME notes found.", todos);
+  if (!todos.length) toast("No TODO or FIXME notes found");
+}
+async function proseCheck() {
+  const t = state.tabs[state.active];
+  const texPath = (t && t.kind === "text" && t.path.toLowerCase().endsWith(".tex")) ? t.path : null;
+  if (!texPath) { toast("Open a .tex file first", "err"); return; }
+  if (t.dirty) await saveActive();
+  const r = await api.post("/api/prose", {path: texPath});
+  if (r.error) { toast(r.error, "err", 6000); return; }
+  const rel = texPath.startsWith(state.root + "\\") ? texPath.slice(state.root.length + 1) : r.file;
+  const hits = (r.issues || []).map(it => ({file: rel, line: it.line, text: "[" + it.kind + "] " + it.text}));
+  showHitList(hits.length ? hits.length + " prose notes in " + r.file + " (advisory)" : "No prose issues flagged.", hits);
+  toast(hits.length ? hits.length + " prose notes — see the Search panel" : "No prose issues flagged");
 }
 
 /* ================= pane resizing ================= */
