@@ -670,6 +670,7 @@ html[data-theme="light"] .overlay { background:rgba(70,60,40,.35); }
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <button class="actbtn" id="upd-check">Check for updates</button>
         <button class="btn-primary" id="upd-apply" style="display:none">Update now</button>
+        <button class="actbtn" id="restart-btn" title="Restart the server so updates and edits take effect">↻ Restart Beacon</button>
         <span id="upd-status" class="set-hint" style="margin:0"></span>
       </div></div>
     <div class="set-hint" id="about-line" style="padding-top:8px;border-top:1px solid var(--ink-700);margin-top:6px">Beacon v1.0.0 &middot; &copy; 2026 Chandan Chaudhary</div>
@@ -998,13 +999,47 @@ $("upd-apply").addEventListener("click", async () => {
   if (r.error) { status.textContent = r.error; return; }
   if (r.updated) {
     apply.style.display = "none";
-    status.textContent = "Updated " + r.from + " → " + r.to + ". Restart Beacon to apply.";
-    toast("Beacon updated. Restart to apply the new version.", "", 8000);
+    status.textContent = "Updated " + r.from + " → " + r.to + ". Click Restart Beacon to apply.";
+    toast("Beacon updated. Click Restart Beacon to apply the new version.", "", 8000);
   } else {
     status.textContent = r.message || "Already up to date.";
     apply.style.display = "none";
   }
 });
+$("restart-btn").addEventListener("click", () => {
+  confirmModal("Restart Beacon",
+    "Restart the app so updates and changes take effect? It reloads here in a few seconds.",
+    async () => {
+      const r = await api.post("/api/restart", {update: true});
+      if (r.error) { toast(r.error, "err", 6000); return; }
+      $("settings-ov").classList.remove("open");
+      restartOverlay(r.message || "Restarting Beacon…");
+    });
+});
+// Show a blocking overlay, wait for the server to go down and come back, then
+// reload in place so the same window picks up the fresh server (and its token).
+function restartOverlay(msg) {
+  const ov = document.createElement("div");
+  ov.id = "restart-ov";
+  ov.style.cssText = "position:fixed;inset:0;z-index:9999;background:var(--ink-900);" +
+    "color:var(--text);display:flex;align-items:center;justify-content:center;" +
+    "flex-direction:column;gap:16px;font:14px var(--sans);";
+  ov.innerHTML = '<div style="width:24px;height:24px;border:3px solid var(--ink-600);' +
+    'border-top-color:var(--clay);border-radius:50%;animation:spin .7s linear infinite"></div>' +
+    '<div id="restart-msg"></div>' +
+    '<div class="set-hint" style="font-size:11px">If this window does not return, reopen with run_beacon.bat.</div>';
+  document.body.appendChild(ov);
+  $("restart-msg").textContent = msg;
+  let downSeen = false;
+  const tick = async () => {
+    try {
+      const res = await fetch("/", {cache: "no-store"});
+      if (res.ok && downSeen) { location.reload(); return; }
+    } catch (e) { downSeen = true; }
+    setTimeout(tick, 700);
+  };
+  setTimeout(tick, 1400);
+}
 
 /* ================= boot + workspace ================= */
 async function boot() {

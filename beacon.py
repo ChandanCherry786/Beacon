@@ -2207,6 +2207,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.api_git_connect(body)
             elif route == "/api/app/update":
                 self.api_app_update(body)
+            elif route == "/api/restart":
+                self.api_restart(body)
             elif route == "/api/run":
                 self.api_run(body)
             elif route == "/api/term":
@@ -3373,6 +3375,35 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"ok": True, "updated": True, "from": cur.strip(), "to": newcur.strip(),
                     "behind": behind, "message": "Updated to the latest version. Restart Beacon to apply the change."})
 
+    def api_restart(self, body):
+        """Restart the server so on-disk code changes take effect, optionally
+        pulling the latest version first. A fresh window opens on the new
+        server; the current one disconnects."""
+        note = "Restarting Beacon…"
+        if body.get("update"):
+            repo = SCRIPT_DIR
+            rc, _ = run_cmd("git rev-parse --is-inside-work-tree", repo)
+            if rc == 0:
+                rc_u, upstream = run_cmd("git rev-parse --abbrev-ref --symbolic-full-name @{u}", repo)
+                upstream = upstream.strip() if rc_u == 0 else "origin/main"
+                remote = upstream.split("/", 1)[0]
+                run_cmd(f"git fetch --quiet {remote}", repo, timeout=60)
+                rc2, _ = run_cmd(f"git merge --ff-only {upstream}", repo, timeout=60)
+                note = ("Updated to the latest version, restarting…" if rc2 == 0
+                        else "No update to apply (local copy is ahead or changed); restarting…")
+            else:
+                note = "Not a git checkout, so nothing to update; restarting…"
+        if not restart_beacon():
+            self._json({"error": "could not launch the relauncher"}, 500)
+            return
+        self._json({"ok": True, "restarting": True, "message": note})
+
+        def go():
+            time.sleep(0.8)
+            os._exit(0)
+
+        threading.Thread(target=go, daemon=True).start()
+
     def api_gitop(self, body):
         path = body.get("path", "")
         op = body.get("op", "")
@@ -3541,6 +3572,32 @@ def find_pandoc():
         if os.path.isfile(full):
             return full
     return None
+
+
+def restart_beacon():
+    """Relaunch Beacon so edited code or a pulled update takes effect. A
+    detached helper polls until this process releases the port, then starts a
+    fresh instance; the caller then exits. Returns True if the helper spawned."""
+    py = sys.executable
+    script = os.path.abspath(__file__)
+    boot = (
+        "import socket, time, subprocess\n"
+        "for _ in range(120):\n"
+        "    sk = socket.socket()\n"
+        "    try:\n"
+        "        sk.settimeout(0.4)\n"
+        "        sk.connect(('127.0.0.1', " + str(PORT) + "))\n"
+        "        sk.close()\n"
+        "        time.sleep(0.25)\n"
+        "    except OSError:\n"
+        "        break\n"
+        "subprocess.Popen([" + repr(py) + ", " + repr(script) + ", '--no-browser'])\n"
+    )
+    try:
+        subprocess.Popen([py, "-c", boot], creationflags=CREATION_FLAGS, close_fds=True)
+        return True
+    except OSError:
+        return False
 
 
 def rasterize_pdf_figures(source, folder, media_dir):
