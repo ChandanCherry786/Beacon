@@ -2494,19 +2494,26 @@ class Handler(BaseHTTPRequestHandler):
                     job_emit(job_id, "error", "could not read the document")
                     job_done(job_id, -1)
                     return
-                new_source, nconv, warns = rasterize_pdf_figures(source, folder, media_dir)
-                for w in warns[:20]:
-                    job_emit(job_id, "info", "figure: " + w)
-                if nconv:
-                    job_emit(job_id, "info", f"rendered {nconv} vector figure(s) to 300-DPI PNG")
+                new_source, fstats, warns = rasterize_pdf_figures(source, folder, media_dir)
+                job_emit(job_id, "info",
+                         f"figures: {fstats['found']} referenced, {fstats['converted']} vector "
+                         f"rendered to 300-DPI PNG, {fstats['raster']} already raster, "
+                         f"{len(fstats['missing'])} not located")
+                for miss in fstats["missing"][:15]:
+                    job_emit(job_id, "info", "  could not locate figure: " + miss)
+                for w in warns[:15]:
+                    job_emit(job_id, "info", "  " + w)
                 with open(tmp_tex, "w", encoding="utf-8") as f:
                     f.write(new_source)
+                font = detect_docx_font(source)
                 ref_opt = ""
-                if make_reference_docx(pandoc, ref_docx):
+                if make_reference_docx(pandoc, ref_docx, font, justify=True):
                     ref_opt = f' --reference-doc "{os.path.basename(ref_docx)}"'
-                    job_emit(job_id, "info", "applied Times New Roman template (headings, 1-inch margins)")
+                    job_emit(job_id, "info",
+                             f"applied {font} template (justified body, numbered headings, "
+                             "styled captions, 1-inch margins)")
                 cmd = (f'"{pandoc}" "{os.path.basename(tmp_tex)}" -o "{docx}" --citeproc '
-                       f'--resource-path=. --dpi=300' + ref_opt)
+                       f'--number-sections --resource-path=. --dpi=300' + ref_opt)
                 if bib and '"' not in bib:
                     cmd += f' --bibliography "{bib}"'
                 job_emit(job_id, "info", f"pandoc: {name} -> {docx}"
@@ -3551,10 +3558,12 @@ def rasterize_pdf_figures(source, folder, media_dir):
     if m:
         gp = re.findall(r"\{([^}]*)\}", m.group(1))
     search_dirs = [folder] + [os.path.normpath(os.path.join(folder, d)) for d in gp if d]
-    exts = ["", ".pdf", ".PDF", ".eps", ".EPS", ".png", ".jpg", ".jpeg", ".PNG", ".JPG"]
-    cache, warnings, stats = {}, [], {"n": 0}
+    exts = ["", ".pdf", ".PDF", ".eps", ".EPS", ".png", ".PNG", ".jpg", ".JPG", ".jpeg"]
+    cache, warnings = {}, []
+    stats = {"found": 0, "converted": 0, "raster": 0, "missing": []}
 
     def resolve(p):
+        p = p.strip().strip('"')
         for d in search_dirs:
             for e in exts:
                 cand = os.path.normpath(os.path.join(d, p + e))
@@ -3568,8 +3577,7 @@ def rasterize_pdf_figures(source, folder, media_dir):
         try:
             os.makedirs(media_dir, exist_ok=True)
             doc = fitz.open(src)
-            page = doc.load_page(0)
-            pix = page.get_pixmap(dpi=300)
+            pix = doc.load_page(0).get_pixmap(dpi=300)
             base = re.sub(r"[^A-Za-z0-9_.-]", "_", os.path.splitext(os.path.basename(src))[0])
             out = os.path.join(media_dir, base + ".png")
             i = 1
@@ -3580,30 +3588,52 @@ def rasterize_pdf_figures(source, folder, media_dir):
             doc.close()
             rel = os.path.relpath(out, folder).replace("\\", "/")
             cache[src] = rel
-            stats["n"] += 1
+            stats["converted"] += 1
             return rel
         except Exception as e:
-            warnings.append(f"{os.path.basename(src)}: {e}")
+            warnings.append(f"could not render {os.path.basename(src)}: {e}")
             cache[src] = None
             return None
 
     def repl(mo):
+        stats["found"] += 1
         opts, path = mo.group(1) or "", mo.group(2).strip()
         resolved = resolve(path)
-        if resolved and resolved.lower().endswith((".pdf", ".eps")):
+        if not resolved:
+            stats["missing"].append(path)
+            return mo.group(0)
+        if resolved.lower().endswith((".pdf", ".eps")):
             rel = to_png(resolved)
             if rel:
                 return "\\includegraphics" + opts + "{" + rel + "}"
+            return mo.group(0)
+        stats["raster"] += 1
         return mo.group(0)
 
-    new_source = re.sub(r"\\includegraphics(\[[^\]]*\])?\s*\{([^}]*)\}", repl, source)
-    return new_source, stats["n"], warnings
+    new_source = re.sub(r"\\includegraphics\*?(\[[^\]]*\])?\s*\{([^}]*)\}", repl, source)
+    return new_source, stats, warnings
 
 
-def make_reference_docx(pandoc, out_path):
-    """Produce a Pandoc reference document with an academic look: Times New
-    Roman body, bold black headings, and one-inch margins. Starts from Pandoc's
-    own default so every style Pandoc maps to is present, then restyles it."""
+def detect_docx_font(source):
+    """Pick the Word body font from the LaTeX. A document that makes its
+    default family sans-serif (beamer, or familydefault set to sfdefault) maps
+    to Arial; everything else, including IEEEtran and the article default, maps
+    to Times New Roman, the closest common Word serif."""
+    if re.search(r"\\documentclass[^{}]*\{beamer\}", source):
+        return "Arial"
+    if re.search(r"\\renewcommand\s*\{?\s*\\familydefault\s*\}?\s*\{\s*\\sfdefault\s*\}", source):
+        return "Arial"
+    if re.search(r"\\usepackage\[[^\]]*sfdefault[^\]]*\]", source):
+        return "Arial"
+    return "Times New Roman"
+
+
+def make_reference_docx(pandoc, out_path, font="Times New Roman", justify=True):
+    """Produce a Pandoc reference document that matches the source: the chosen
+    body font, justified body text when the source is justified, bold black
+    headings, styled figure and table captions, and one-inch margins. Starts
+    from Pandoc's own default so every style Pandoc maps to exists, then
+    restyles it."""
     try:
         rc, _ = run_cmd(f'"{pandoc}" -o "{out_path}" --print-default-data-file reference.docx',
                         os.path.dirname(out_path) or ".", timeout=30)
@@ -3611,20 +3641,36 @@ def make_reference_docx(pandoc, out_path):
             return False
         from docx import Document
         from docx.shared import Pt, Inches, RGBColor
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
         doc = Document(out_path)
         for s in doc.sections:
             s.top_margin = s.bottom_margin = Inches(1)
             s.left_margin = s.right_margin = Inches(1)
-        for name, size, bold in [("Normal", 11, False), ("Body Text", 11, False),
-                                 ("Heading 1", 15, True), ("Heading 2", 13, True),
-                                 ("Heading 3", 12, True), ("Title", 20, True)]:
+        for name in ("Normal", "Body Text", "First Paragraph", "Compact"):
             try:
                 st = doc.styles[name]
-                st.font.name = "Times New Roman"
+                st.font.name = font
+                st.font.size = Pt(11)
+                if justify and st.paragraph_format is not None:
+                    st.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+            except KeyError:
+                pass
+        for name, size in (("Heading 1", 15), ("Heading 2", 13), ("Heading 3", 12),
+                           ("Heading 4", 11), ("Title", 20)):
+            try:
+                st = doc.styles[name]
+                st.font.name = font
                 st.font.size = Pt(size)
-                if bold:
-                    st.font.bold = True
-                    st.font.color.rgb = RGBColor(0, 0, 0)
+                st.font.bold = True
+                st.font.color.rgb = RGBColor(0, 0, 0)
+            except KeyError:
+                pass
+        for name in ("Image Caption", "Table Caption", "Caption"):
+            try:
+                st = doc.styles[name]
+                st.font.name = font
+                st.font.size = Pt(9.5)
+                st.font.italic = True
             except KeyError:
                 pass
         doc.save(out_path)
