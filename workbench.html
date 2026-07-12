@@ -3319,7 +3319,15 @@ $("pomo-gear").addEventListener("click", ev => {
   const m = $("pomo-menu");
   const open = m.classList.contains("open");
   closeMenus();
-  if (!open) { m.classList.add("open"); }
+  if (!open) {
+    // .menu is position:fixed, so anchor it under the gear with real pixel
+    // coordinates (right-aligned) instead of the CSS percentage offset.
+    m.classList.add("open");
+    const g = $("pomo-gear").getBoundingClientRect();
+    m.style.left = Math.max(8, Math.min(g.right - m.offsetWidth, innerWidth - m.offsetWidth - 8)) + "px";
+    m.style.top = (g.bottom + 4) + "px";
+    m.style.right = "auto";
+  }
 });
 $("pomo-focus").addEventListener("change", () => {
   pomo.focusMin = Math.max(1, Math.min(120, parseInt($("pomo-focus").value, 10) || 25));
