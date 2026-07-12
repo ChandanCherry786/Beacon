@@ -14,6 +14,10 @@
 #                     Black also works if it is installed instead of Ruff.
 #     jupyter         Runs .ipynb notebooks (right-click a notebook > Run).
 #     nbconvert       The nbconvert engine used to execute those notebooks.
+#     PyMuPDF         Renders PDF/EPS figures to PNG for the LaTeX to Word
+#                     export, so vector figures appear in the .docx.
+#     python-docx     Applies the font/heading/margin template and the
+#                     two-column layout to the exported .docx.
 #
 # Install the small defaults with:  pip install -r requirements.txt
 # Jupyter is larger, so it stays commented below; uncomment it or run
@@ -25,6 +29,8 @@
 # Python: 3.9+ (CPython, includes tkinter). Verified on 3.13.7.
 pywinpty
 ruff
+PyMuPDF
+python-docx
 # jupyter
 # nbconvert
 #

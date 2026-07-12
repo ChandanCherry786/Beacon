@@ -2455,9 +2455,11 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"job": job_id})
 
     def api_export_docx(self, body):
-        """Convert a LaTeX document to Word (.docx) with Pandoc, which keeps
-        the structure, headings, tables, equations, and citations rather than
-        producing a lossy dump."""
+        r"""Convert a LaTeX document to Word (.docx) with Pandoc, first rendering
+        vector (PDF/EPS) figures to PNG so they appear in Word, applying a Times
+        New Roman template for consistent fonts, headings, and margins, and
+        setting two columns when the source is two-column. Word cannot reproduce
+        LaTeX exactly, so the result is close, not identical."""
         tex = body.get("path", "")
         if not path_allowed(tex) or not tex.lower().endswith(".tex"):
             self._json({"error": "select a .tex file"}, 400)
@@ -2474,17 +2476,64 @@ class Handler(BaseHTTPRequestHandler):
             return
         folder = os.path.dirname(tex)
         docx = os.path.splitext(name)[0] + ".docx"
+        docx_path = os.path.join(folder, docx)
         bib = next((f for f in os.listdir(folder) if f.lower().endswith(".bib")), None)
-        cmd = f'"{pandoc}" "{name}" -o "{docx}" --citeproc --resource-path=.'
-        if bib and '"' not in bib:
-            cmd += f' --bibliography "{bib}"'
         job_id = new_job()
         if note:
             job_emit(job_id, "info", note)
-        job_emit(job_id, "info", f"pandoc: {name} -> {docx}"
-                 + (f" (with {bib})" if bib else ""))
-        stream_job(job_id, cmd, folder, timeout=300)
-        self._json({"job": job_id, "docx": os.path.join(folder, docx)})
+
+        def worker():
+            media_dir = os.path.join(folder, "_beacon_media")
+            tmp_tex = os.path.join(folder, "_beacon_export.tex")
+            ref_docx = os.path.join(folder, "_beacon_reference.docx")
+            rc = -1
+            try:
+                job_emit(job_id, "info", "expanding the document and preparing figures…")
+                source = expand_tex_inputs(tex) or ""
+                if not source:
+                    job_emit(job_id, "error", "could not read the document")
+                    job_done(job_id, -1)
+                    return
+                new_source, nconv, warns = rasterize_pdf_figures(source, folder, media_dir)
+                for w in warns[:20]:
+                    job_emit(job_id, "info", "figure: " + w)
+                if nconv:
+                    job_emit(job_id, "info", f"rendered {nconv} vector figure(s) to 300-DPI PNG")
+                with open(tmp_tex, "w", encoding="utf-8") as f:
+                    f.write(new_source)
+                ref_opt = ""
+                if make_reference_docx(pandoc, ref_docx):
+                    ref_opt = f' --reference-doc "{os.path.basename(ref_docx)}"'
+                    job_emit(job_id, "info", "applied Times New Roman template (headings, 1-inch margins)")
+                cmd = (f'"{pandoc}" "{os.path.basename(tmp_tex)}" -o "{docx}" --citeproc '
+                       f'--resource-path=. --dpi=300' + ref_opt)
+                if bib and '"' not in bib:
+                    cmd += f' --bibliography "{bib}"'
+                job_emit(job_id, "info", f"pandoc: {name} -> {docx}"
+                         + (f" (with {bib})" if bib else ""))
+                rc = run_step(job_id, cmd, folder, 300)
+                if rc == 0 and detect_two_column(source):
+                    if set_two_columns(docx_path):
+                        job_emit(job_id, "info", "set a two-column layout to match the source")
+                if rc == 0:
+                    job_emit(job_id, "info", "Done. Word cannot match LaTeX exactly, so review "
+                             "figure sizes, equations, and column breaks.")
+            except Exception as e:
+                job_emit(job_id, "error", str(e))
+            finally:
+                try:
+                    if os.path.isfile(tmp_tex):
+                        os.remove(tmp_tex)
+                    if os.path.isfile(ref_docx):
+                        os.remove(ref_docx)
+                    if os.path.isdir(media_dir):
+                        shutil.rmtree(media_dir, ignore_errors=True)
+                except OSError:
+                    pass
+                job_done(job_id, rc)
+
+        threading.Thread(target=worker, daemon=True).start()
+        self._json({"job": job_id, "docx": docx_path})
 
     def api_wordcount(self, body):
         """Estimate the word count of a LaTeX document, following \\input and
@@ -3485,6 +3534,140 @@ def find_pandoc():
         if os.path.isfile(full):
             return full
     return None
+
+
+def rasterize_pdf_figures(source, folder, media_dir):
+    r"""Word cannot embed a PDF or EPS figure, so a paper that uses vector
+    figures loses them or errors on conversion. This renders each such figure
+    to a 300-DPI PNG with PyMuPDF and rewrites the \includegraphics to point at
+    the PNG. Raster figures already usable by Word are left untouched. Returns
+    (rewritten_source, converted_count, warnings)."""
+    try:
+        import fitz  # PyMuPDF
+    except Exception:
+        return source, 0, ["PyMuPDF is not installed; vector figures were left as-is"]
+    gp = []
+    m = re.search(r"\\graphicspath\{((?:\{[^}]*\})+)\}", source)
+    if m:
+        gp = re.findall(r"\{([^}]*)\}", m.group(1))
+    search_dirs = [folder] + [os.path.normpath(os.path.join(folder, d)) for d in gp if d]
+    exts = ["", ".pdf", ".PDF", ".eps", ".EPS", ".png", ".jpg", ".jpeg", ".PNG", ".JPG"]
+    cache, warnings, stats = {}, [], {"n": 0}
+
+    def resolve(p):
+        for d in search_dirs:
+            for e in exts:
+                cand = os.path.normpath(os.path.join(d, p + e))
+                if os.path.isfile(cand):
+                    return cand
+        return None
+
+    def to_png(src):
+        if src in cache:
+            return cache[src]
+        try:
+            os.makedirs(media_dir, exist_ok=True)
+            doc = fitz.open(src)
+            page = doc.load_page(0)
+            pix = page.get_pixmap(dpi=300)
+            base = re.sub(r"[^A-Za-z0-9_.-]", "_", os.path.splitext(os.path.basename(src))[0])
+            out = os.path.join(media_dir, base + ".png")
+            i = 1
+            while os.path.exists(out):
+                out = os.path.join(media_dir, f"{base}_{i}.png")
+                i += 1
+            pix.save(out)
+            doc.close()
+            rel = os.path.relpath(out, folder).replace("\\", "/")
+            cache[src] = rel
+            stats["n"] += 1
+            return rel
+        except Exception as e:
+            warnings.append(f"{os.path.basename(src)}: {e}")
+            cache[src] = None
+            return None
+
+    def repl(mo):
+        opts, path = mo.group(1) or "", mo.group(2).strip()
+        resolved = resolve(path)
+        if resolved and resolved.lower().endswith((".pdf", ".eps")):
+            rel = to_png(resolved)
+            if rel:
+                return "\\includegraphics" + opts + "{" + rel + "}"
+        return mo.group(0)
+
+    new_source = re.sub(r"\\includegraphics(\[[^\]]*\])?\s*\{([^}]*)\}", repl, source)
+    return new_source, stats["n"], warnings
+
+
+def make_reference_docx(pandoc, out_path):
+    """Produce a Pandoc reference document with an academic look: Times New
+    Roman body, bold black headings, and one-inch margins. Starts from Pandoc's
+    own default so every style Pandoc maps to is present, then restyles it."""
+    try:
+        rc, _ = run_cmd(f'"{pandoc}" -o "{out_path}" --print-default-data-file reference.docx',
+                        os.path.dirname(out_path) or ".", timeout=30)
+        if rc != 0 or not os.path.isfile(out_path):
+            return False
+        from docx import Document
+        from docx.shared import Pt, Inches, RGBColor
+        doc = Document(out_path)
+        for s in doc.sections:
+            s.top_margin = s.bottom_margin = Inches(1)
+            s.left_margin = s.right_margin = Inches(1)
+        for name, size, bold in [("Normal", 11, False), ("Body Text", 11, False),
+                                 ("Heading 1", 15, True), ("Heading 2", 13, True),
+                                 ("Heading 3", 12, True), ("Title", 20, True)]:
+            try:
+                st = doc.styles[name]
+                st.font.name = "Times New Roman"
+                st.font.size = Pt(size)
+                if bold:
+                    st.font.bold = True
+                    st.font.color.rgb = RGBColor(0, 0, 0)
+            except KeyError:
+                pass
+        doc.save(out_path)
+        return True
+    except Exception:
+        return False
+
+
+def detect_two_column(source):
+    m = re.search(r"\\documentclass\s*(\[[^\]]*\])?\s*\{([^}]+)\}", source)
+    if not m:
+        return False
+    opts = (m.group(1) or "").lower()
+    cls = m.group(2).strip().lower()
+    if "onecolumn" in opts:
+        return False
+    if "twocolumn" in opts:
+        return True
+    # IEEEtran and IEEEconf are two-column by default.
+    return cls in ("ieeetran", "ieeeconf")
+
+
+def set_two_columns(docx_path):
+    """Set the body of the .docx to two columns, matching a two-column source.
+    Word two-column layout is only an approximation of LaTeX's, but it keeps
+    the paper close to the compiled look."""
+    try:
+        from docx import Document
+        from docx.oxml.ns import qn
+        from docx.oxml import OxmlElement
+        doc = Document(docx_path)
+        for section in doc.sections:
+            sectPr = section._sectPr
+            cols = sectPr.find(qn("w:cols"))
+            if cols is None:
+                cols = OxmlElement("w:cols")
+                sectPr.append(cols)
+            cols.set(qn("w:num"), "2")
+            cols.set(qn("w:space"), "425")
+        doc.save(docx_path)
+        return True
+    except Exception:
+        return False
 
 
 def find_browser():
