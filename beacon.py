@@ -3002,6 +3002,9 @@ class Handler(BaseHTTPRequestHandler):
                     "url": fld.get("url") or (("https://doi.org/" + doi) if doi else ""),
                     "abstract": fld.get("abstract", ""), "key": key,
                     "bibfile": relbib, "cited": True,
+                    # The exact entry from the .bib, so the library shows this
+                    # paper's real key rather than a freshly generated one.
+                    "bibtex": format_bib_entry(e),
                 })
         items.sort(key=lambda it: str(it.get("year") or ""), reverse=True)
         return items

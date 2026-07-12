@@ -751,11 +751,11 @@ html[data-theme="light"] .overlay { background:rgba(70,60,40,.35); }
         <option value="book">Books</option>
         <option value="preprint">Preprints</option>
       </select>
-      <label for="find-focus">Rank</label>
+      <label for="find-focus">Sort</label>
       <select id="find-focus">
-        <option value="boost">EE venues first</option>
-        <option value="rel">Published first</option>
-        <option value="ee">Power &amp; EE only</option>
+        <option value="rel">Best match</option>
+        <option value="boost">IEEE, IET &amp; Elsevier first</option>
+        <option value="ee">IEEE, IET &amp; Elsevier only</option>
       </select>
     </div>
     <div id="find-info"></div>
@@ -2954,7 +2954,9 @@ async function selectCite(it, row) {
   const linkUrl = it.url || (it.doi ? "https://doi.org/" + it.doi : "");
   let meta = "<b>" + esc(it.title || "") + "</b><br>" +
     esc([it.authors, it.year, it.venue].filter(Boolean).join("  ·  "));
-  meta += it.authoritative
+  if (it.cited && it.key)
+    meta += "<br><span style='color:var(--ok);font-size:10.5px'>✓ in references.bib as <code>\\cite{" + esc(it.key) + "}</code></span>";
+  else meta += it.authoritative
     ? "<br><span style='color:var(--ok);font-size:10.5px'>✓ authors from the publisher record</span>"
     : "<br><span style='color:var(--faint);font-size:10.5px'>authors from the index (not publisher-verified)</span>";
   if (it.doi) meta += "<br><span style='font-family:var(--mono);font-size:11px'>doi:" + esc(it.doi) + "</span>";
@@ -2969,6 +2971,12 @@ async function selectCite(it, row) {
 $("cite-style").addEventListener("change", () => loadCiteFormat($("cite-style").value));
 async function getBibtex() {
   if (citeState.bibtex) return citeState.bibtex;
+  // A library item already has its exact entry (and key) in references.bib;
+  // use it rather than re-fetching, which would invent a different key.
+  if (citeState.meta && citeState.meta.bibtex) {
+    citeState.bibtex = citeState.meta.bibtex;
+    return citeState.bibtex;
+  }
   const r = await api.post("/api/find/bibtex", citeState.meta || {doi: citeState.doi});
   if (r.error) return null;
   citeState.bibtex = r.text;
