@@ -1739,6 +1739,10 @@ class Handler(BaseHTTPRequestHandler):
                 self.api_export_md(body)
             elif route == "/api/bibtidy":
                 self.api_bibtidy(body)
+            elif route == "/api/citekeys":
+                self.api_citekeys(body)
+            elif route == "/api/citecheck":
+                self.api_citecheck(body)
             elif route == "/api/gitop":
                 self.api_gitop(body)
             elif route == "/api/git/connect":
@@ -2190,6 +2194,78 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"ok": True, "entries_in": len(entries), "entries_out": len(kept),
                     "removed_keys": removed_keys, "dup_dois": dup_dois,
                     "backup": os.path.basename(path + ".bak")})
+
+    def api_citekeys(self, body):
+        """Return every citation key defined in the workspace .bib files, each
+        with a short author/year/title label, for cite autocompletion."""
+        root = get_root()
+        if not root:
+            self._json({"keys": []})
+            return
+        clean = lambda v: re.sub(r"[{}]", "", v).strip() if v else ""
+        out, seen = [], set()
+        for fp in walk_workspace(root):
+            if not fp.lower().endswith(".bib"):
+                continue
+            try:
+                with open(fp, "r", encoding="utf-8", errors="replace") as f:
+                    parsed = parse_bib(f.read())
+            except OSError:
+                continue
+            if not parsed:
+                continue
+            for e in parsed[1]:
+                k = e["key"]
+                if not k or k in seen:
+                    continue
+                seen.add(k)
+                fields = dict(e["fields"])
+                author = clean(fields.get("author", ""))
+                first = author.split(" and ")[0].split(",")[0].strip() if author else ""
+                out.append({"key": k, "author": first,
+                            "year": clean(fields.get("year", "")),
+                            "title": clean(fields.get("title", ""))})
+        out.sort(key=lambda x: x["key"].lower())
+        self._json({"keys": out})
+
+    def api_citecheck(self, body):
+        r"""Cross-check the \cite keys used in a LaTeX document against the
+        entries defined in the workspace .bib files, reporting citations with
+        no matching entry and entries that are never cited."""
+        tex = body.get("path", "")
+        if not path_allowed(tex) or not tex.lower().endswith(".tex"):
+            self._json({"error": "select a .tex file"}, 400)
+            return
+        tex, note = resolve_main_tex(tex)
+        text = expand_tex_inputs(tex)
+        if not text:
+            self._json({"error": "could not read the document"}, 500)
+            return
+        used = set()
+        cite_re = re.compile(r"\\[a-zA-Z]*cite[a-zA-Z]*\*?\s*(?:\[[^\]]*\])*\s*\{([^}]*)\}")
+        for m in cite_re.finditer(text):
+            for k in m.group(1).split(","):
+                k = k.strip()
+                if k:
+                    used.add(k)
+        defined = set()
+        root = get_root()
+        for fp in (walk_workspace(root) if root else []):
+            if not fp.lower().endswith(".bib"):
+                continue
+            try:
+                with open(fp, "r", encoding="utf-8", errors="replace") as f:
+                    parsed = parse_bib(f.read())
+            except OSError:
+                continue
+            if parsed:
+                for e in parsed[1]:
+                    if e["key"]:
+                        defined.add(e["key"])
+        self._json({"ok": True, "file": os.path.basename(tex), "note": note,
+                    "used": len(used), "defined": len(defined),
+                    "undefined": sorted(used - defined),
+                    "uncited": sorted(defined - used)})
 
     def api_find_search(self, q):
         """Keyword search over scholarly works and books. OpenAlex is the

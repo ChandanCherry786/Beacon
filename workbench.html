@@ -167,8 +167,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   font-size:12.5px; color:var(--faint); padding:3px 9px; border-radius:4px; }
 .side-tab.active { color:var(--text); background:var(--ink-700); }
 #sidebar-head .iconbtn { margin-left:auto; width:24px; height:22px; font-size:12px; }
-#treewrap, #searchwrap { flex:1; overflow:auto; padding:2px 0 24px; display:none; }
-#treewrap.show, #searchwrap.show { display:block; }
+#treewrap, #searchwrap, #outlinewrap { flex:1; overflow:auto; padding:2px 0 24px; display:none; }
+#treewrap.show, #searchwrap.show, #outlinewrap.show { display:block; }
+.olrow { display:flex; align-items:center; gap:6px; padding:2px 8px; cursor:pointer;
+  color:var(--dim); font-size:12.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.olrow:hover { background:var(--ink-700); color:var(--text); }
+.olrow .olkind { color:var(--faint); font-size:10px; flex:none; width:14px; text-align:center; }
+.olrow .olname { overflow:hidden; text-overflow:ellipsis; }
 .trow { display:flex; align-items:center; gap:5px; padding:2.5px 8px 2.5px 0; cursor:pointer;
   white-space:nowrap; border-left:2px solid transparent; user-select:none;
   transition:background .1s ease, border-color .1s ease; }
@@ -504,6 +509,7 @@ html[data-theme="light"] .overlay { background:rgba(70,60,40,.35); }
     <div id="sidebar-head">
       <button class="side-tab active" id="filestab">Files</button>
       <button class="side-tab" id="searchtab">Search</button>
+      <button class="side-tab" id="outlinetab">Outline</button>
       <button class="iconbtn" id="newfilebtn" title="New file in the workspace root">+</button>
       <button class="iconbtn" id="newfolderbtn" title="New folder in the workspace root">▤</button>
       <button class="iconbtn" id="refreshbtn" title="Refresh the file tree">⟳</button>
@@ -514,6 +520,7 @@ html[data-theme="light"] .overlay { background:rgba(70,60,40,.35); }
       <div id="searchinfo"></div>
       <div id="searchresults"></div>
     </div>
+    <div id="outlinewrap"><div id="outlinebody"><div class="tree-empty">Open a .tex or .py file.</div></div></div>
   </div>
   <div id="gl"></div>
 
@@ -766,7 +773,14 @@ const state = {
   root:"", tabs:[], active:-1, lastPdf:null, gitInfo:null,
   termES:null, chatBusy:false, recents:[], settings:{},
   expanded:new Set(), rootHistory:[], qoIndex:null, qoSel:0, autosaveTimer:null,
+  citeKeys:[],
 };
+async function loadCiteKeys() {
+  try {
+    const r = await api.post("/api/citekeys", {});
+    state.citeKeys = (r && r.keys) || [];
+  } catch (e) { state.citeKeys = []; }
+}
 
 /* ================= helpers ================= */
 function esc(s) {
@@ -992,6 +1006,7 @@ async function setRoot(root, push) {
   state.expanded = new Set(); state.qoIndex = null;
   renderTabs(); showPane(); persistTabs();
   await loadTree();
+  loadCiteKeys();
   restartTerminal(true);
   updateGit(root);
 }
@@ -1222,6 +1237,7 @@ function activate(i) {
   updateGit(tab ? tab.path : state.root);
   updateActions(); updateCtxLine();
   updatePreviewPane();
+  refreshOutline();
   // Opening a markdown file shows its rendered reader on the right.
   if (tab && tab.kind === "text" && tab.lang === "markdown") setRightTab("preview");
 }
@@ -1513,6 +1529,24 @@ function computeAc() {
   const pos = ed.selectionStart;
   const before = ed.value.slice(0, pos);
   if (lang === "latex") {
+    // Citation keys inside \cite{…}, \citep{…}, \parencite{…}, and the rest.
+    const cm = before.match(/\\[a-zA-Z]*cite[a-zA-Z]*\*?\s*(?:\[[^\]]*\])*\{([^}]*)$/);
+    if (cm && state.citeKeys.length) {
+      const frag = cm[1];
+      const partial = frag.slice(frag.lastIndexOf(",") + 1).replace(/^\s+/, "");
+      const q = partial.toLowerCase();
+      const items = state.citeKeys.filter(k =>
+          k.key.toLowerCase().includes(q) ||
+          (k.author && k.author.toLowerCase().includes(q)) ||
+          (k.year && k.year.includes(q)))
+        .slice(0, 40)
+        .map(k => ({
+          label: k.key + (k.author || k.year ? "  — " + [k.author, k.year].filter(Boolean).join(" ") : "")
+                 + (k.title ? " · " + k.title.slice(0, 42) : ""),
+          insert: k.key
+        }));
+      return items.length ? showAc(pos - partial.length, items) : hideAc();
+    }
     let m = before.match(/\\(?:begin|end)\{([a-zA-Z*]*)$/);
     if (m) {
       const w = m[1];
@@ -1602,7 +1636,10 @@ $("editor").addEventListener("input", () => {
     clearTimeout(mdTimer);
     mdTimer = setTimeout(renderMarkdownPreview, 250);
   }
+  clearTimeout(olTimer);
+  olTimer = setTimeout(refreshOutline, 400);
 });
+let olTimer = null;
 $("editor").addEventListener("scroll", () => { syncScroll(); if (ac.open) hideAc(); });
 $("editor").addEventListener("keyup", updatePos);
 $("editor").addEventListener("click", () => { updatePos(); hideAc(); });
@@ -1672,6 +1709,7 @@ async function saveTab(t, force) {
   if (r.error) { toast("Save failed: " + r.error, "err"); return; }
   t.dirty = false; t.mtime = r.mtime; renderTabs();
   if (t === state.tabs[state.active]) $("st-save").textContent = "saved";
+  if (t.path.toLowerCase().endsWith(".bib")) loadCiteKeys();
 }
 async function saveActive(force) {
   syncActive();
@@ -1925,6 +1963,7 @@ $("toolsbtn").addEventListener("click", ev => {
     m.appendChild(b);
   };
   add("Word count (LaTeX)", wordCount);
+  add("Check citations (.tex vs .bib)", citeCheck);
   add("Format Python file (Ruff/Black)", formatPython);
   m.insertAdjacentHTML("beforeend", '<div class="sep"></div>');
   add("Export LaTeX to Word (.docx)", exportDocx);
@@ -1977,6 +2016,30 @@ async function wordCount() {
   logJob("", "figures/tables: " + r.floats + "    display equations: " + r.display_math + "    inline math: " + r.inline_math);
   logJob("info", "estimate follows \\input/\\include and excludes commands, math, and comments");
   toast("≈ " + r.words.toLocaleString() + " words");
+}
+async function citeCheck() {
+  const t = state.tabs[state.active];
+  const texPath = (t && t.kind === "text" && t.path.toLowerCase().endsWith(".tex")) ? t.path : null;
+  if (!texPath) { toast("Open a .tex file first", "err"); return; }
+  if (t.dirty) await saveActive();
+  const r = await api.post("/api/citecheck", {path: texPath});
+  if (r.error) { toast(r.error, "err", 6000); return; }
+  showDock("out");
+  logJob("info", "── citation check: " + r.file + " ──");
+  if (r.note) logJob("info", r.note);
+  logJob("", r.used + " distinct citations used, " + r.defined + " entries defined across the workspace .bib files");
+  if (r.undefined.length) {
+    logJob("err", r.undefined.length + " undefined (\\cite with no matching .bib entry):");
+    r.undefined.forEach(k => logJob("err", "  ? " + k));
+  } else logJob("", "no undefined citations");
+  if (r.uncited.length) {
+    logJob("info", r.uncited.length + " uncited (.bib entry never cited):");
+    r.uncited.forEach(k => logJob("", "  · " + k));
+  } else logJob("", "no uncited entries");
+  toast(r.undefined.length
+    ? r.undefined.length + " undefined citation(s) — see Output"
+    : "Citations OK — " + r.used + " used, " + r.uncited.length + " unused",
+    r.undefined.length ? "err" : undefined, 5000);
 }
 async function cleanBuild() {
   if (!state.root) { toast("Open a workspace first", "err"); return; }
@@ -2056,6 +2119,7 @@ async function bibTidy(path) {
   logJob("info", "original backed up as " + r.backup);
   await reloadActiveIfChanged();
   loadTree();
+  loadCiteKeys();
   toast("Tidied: " + r.entries_out + " entries kept"
     + (r.removed_keys.length ? ", " + r.removed_keys.length + " duplicate removed" : ""));
 }
@@ -2717,12 +2781,65 @@ $("cite-append").addEventListener("click", async () => {
 /* ================= search in files ================= */
 $("filestab").addEventListener("click", () => setSideTab("files"));
 $("searchtab").addEventListener("click", () => setSideTab("search"));
+$("outlinetab").addEventListener("click", () => setSideTab("outline"));
 function setSideTab(which) {
   $("filestab").classList.toggle("active", which === "files");
   $("searchtab").classList.toggle("active", which === "search");
+  $("outlinetab").classList.toggle("active", which === "outline");
   $("treewrap").classList.toggle("show", which === "files");
   $("searchwrap").classList.toggle("show", which === "search");
+  $("outlinewrap").classList.toggle("show", which === "outline");
   if (which === "search") $("searchbox").focus();
+  if (which === "outline") renderOutline();
+}
+function refreshOutline() { if ($("outlinewrap").classList.contains("show")) renderOutline(); }
+/* Document outline: LaTeX sectioning or Python defs/classes, click to jump. */
+const LATEX_SECT = ["part","chapter","section","subsection","subsubsection","paragraph","subparagraph"];
+function outlineItems(text, lang) {
+  const items = [], lines = text.split("\n");
+  if (lang === "latex") {
+    const re = /^\s*\\(part|chapter|section|subsection|subsubsection|paragraph|subparagraph)\*?\s*\{(.+?)\}/;
+    lines.forEach((ln, i) => {
+      const m = ln.match(re);
+      if (m) items.push({line: i + 1, level: LATEX_SECT.indexOf(m[1]), kind: "§", name: m[2].trim()});
+    });
+  } else if (lang === "python") {
+    const re = /^(\s*)(async\s+def|def|class)\s+([A-Za-z_][A-Za-z0-9_]*)/;
+    lines.forEach((ln, i) => {
+      const m = ln.match(re);
+      if (m) items.push({line: i + 1, level: Math.floor(m[1].replace(/\t/g, "    ").length / 4),
+        kind: m[2] === "class" ? "C" : "ƒ", name: m[3]});
+    });
+  }
+  return items;
+}
+function renderOutline() {
+  const body = $("outlinebody");
+  const t = state.tabs[state.active];
+  if (!t || t.kind !== "text" || (t.lang !== "latex" && t.lang !== "python")) {
+    body.innerHTML = '<div class="tree-empty">Open a .tex or .py file.</div>';
+    return;
+  }
+  syncActive();
+  const items = outlineItems(t.content || "", t.lang);
+  if (!items.length) {
+    body.innerHTML = '<div class="tree-empty">No ' +
+      (t.lang === "latex" ? "sections" : "definitions") + " found.</div>";
+    return;
+  }
+  const minLevel = Math.min(...items.map(it => it.level).filter(l => l >= 0));
+  body.innerHTML = "";
+  items.forEach(it => {
+    const row = document.createElement("div");
+    row.className = "olrow";
+    row.style.paddingLeft = (8 + Math.max(0, it.level - minLevel) * 14) + "px";
+    row.innerHTML = '<span class="olkind"></span><span class="olname"></span>';
+    row.querySelector(".olkind").textContent = it.kind;
+    row.querySelector(".olname").textContent = it.name;
+    row.title = it.name;
+    row.addEventListener("click", () => goToLine(it.line));
+    body.appendChild(row);
+  });
 }
 $("searchbox").addEventListener("keydown", ev => {
   if (ev.key === "Enter") runSearch();
