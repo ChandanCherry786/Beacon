@@ -278,6 +278,289 @@ def is_major_ee(venue, publisher):
         return True
     return False
 
+
+# ---------- multi-source scholarly search ----------
+
+_PREPRINT_HINTS = ("arxiv", "biorxiv", "medrxiv", "chemrxiv", "techrxiv",
+                   "ssrn", "preprint", "research square", "authorea", "osf",
+                   "hal", "repec working paper")
+
+
+def is_preprint(it):
+    """A record is treated as a preprint when its type or venue marks it as
+    one, so peer-reviewed work can be ranked above it."""
+    t = (it.get("type") or "").lower()
+    if t in ("preprint", "posted-content"):
+        return True
+    v = (it.get("venue") or "").lower()
+    return any(h in v for h in _PREPRINT_HINTS)
+
+
+def coarse_type(t):
+    """Reduce each source's type vocabulary to a small shared set so the Type
+    filter behaves the same across OpenAlex, Crossref, and Semantic Scholar."""
+    t = (t or "").lower()
+    if "book" in t:
+        return "book"
+    if any(k in t for k in ("preprint", "posted-content", "arxiv")):
+        return "preprint"
+    if any(k in t for k in ("proceeding", "conference")):
+        return "conference"
+    if any(k in t for k in ("article", "journal", "paper", "review")):
+        return "article"
+    return "other"
+
+
+_STOPWORDS = {"the", "a", "an", "of", "and", "or", "for", "in", "on", "to",
+              "with", "by", "from", "as", "at", "is", "are", "using", "based",
+              "via", "toward", "towards", "study", "analysis"}
+
+
+def _tokens(s):
+    return [w for w in re.sub(r"[^a-z0-9 ]", " ", (s or "").lower()).split() if w]
+
+
+def relevance_score(query, title, authors=""):
+    """How well a record answers the query. An exact title match scores
+    highest, the query appearing verbatim inside the title is next, and
+    otherwise the fraction of query keywords found in the title or author list
+    drives the score, so a mixed "title plus author" query still matches. This
+    is the dominant ranking signal, so pasting a title surfaces that paper
+    first, ahead of more-cited but less-relevant work."""
+    q, t = _tokens(query), _tokens(title)
+    if not q or not t:
+        return 0.0
+    qs, ts = " ".join(q), " ".join(t)
+    if qs == ts:
+        return 120.0
+    score = 0.0
+    if qs in ts:
+        score += 55.0
+    haystack = set(t) | set(_tokens(authors))
+    qc = [w for w in q if w not in _STOPWORDS] or q
+    coverage = sum(1 for w in qc if w in haystack) / len(qc)
+    score += coverage * 40.0
+    if coverage == 1.0:
+        score += 10.0
+    return score
+
+
+def score_item(it, focus, query=""):
+    """Overall rank. Query relevance dominates; peer-reviewed work, a citation
+    record, and (under the EE focuses) a major power/EE venue add only small
+    secondary weight, enough to order results of similar relevance without
+    overturning a strong title or keyword match. Relevance order breaks ties
+    in the caller."""
+    s = relevance_score(query, it.get("title"), it.get("authors"))
+    if not is_preprint(it):
+        s += 1.0
+    if it.get("doi"):
+        s += 0.3
+    c = it.get("cited_by") or 0
+    s += 0.6 if c >= 100 else 0.4 if c >= 20 else 0.2 if c >= 5 else 0.0
+    if focus in ("boost", "ee") and it.get("major"):
+        s += 1.5
+    return s
+
+
+def _norm_title(t):
+    return re.sub(r"[^a-z0-9]", "", (t or "").lower())[:60]
+
+
+def merge_items(results):
+    """Merge per-source result lists, de-duplicating by DOI (or normalized
+    title). When the same work appears in more than one source, the richer
+    fields (abstract, citations, open-access link) are combined and every
+    contributing source is recorded."""
+    by_key, order = {}, []
+    for source, items in results:
+        for idx, it in enumerate(items):
+            it["_srcrank"] = min(idx, it.get("_srcrank", 9999))
+            srcs = it.get("sources") or set()
+            srcs.add(source)
+            it["sources"] = srcs
+            key = (it.get("doi") or "").lower().strip() or _norm_title(it.get("title"))
+            if not key:
+                continue
+            if key in by_key:
+                base = by_key[key]
+                base.setdefault("sources", set()).add(source)
+                base["_srcrank"] = min(base.get("_srcrank", 9999), idx)
+                for f in ("abstract", "oa_url", "venue", "url", "doi"):
+                    if not base.get(f) and it.get(f):
+                        base[f] = it[f]
+                if (it.get("cited_by") or 0) > (base.get("cited_by") or 0):
+                    base["cited_by"] = it["cited_by"]
+                if it.get("major"):
+                    base["major"] = True
+                if not base.get("publisher") and it.get("publisher"):
+                    base["publisher"] = it["publisher"]
+                if not base.get("authors") and it.get("authors"):
+                    base["authors"] = it["authors"]
+                    base["authors_list"] = it.get("authors_list", [])
+            else:
+                by_key[key] = it
+                order.append(key)
+    merged = [by_key[k] for k in order]
+    for it in merged:
+        it["_rank"] = it.get("_srcrank", 9999)
+    return merged
+
+
+def _openalex_item(w):
+    names = [a.get("author", {}).get("display_name", "")
+             for a in (w.get("authorships") or []) if a.get("author")]
+    names = [n for n in names if n]
+    ploc = w.get("primary_location") or {}
+    src = ploc.get("source") or {}
+    venue = src.get("display_name", "") or ""
+    host = src.get("host_organization_name", "") or ""
+    oa = (w.get("open_access") or {}).get("oa_url") or (w.get("best_oa_location") or {}).get("pdf_url")
+    doi = (w.get("doi") or "").replace("https://doi.org/", "")
+    publisher = classify_publisher(venue, host)
+    return {
+        "doi": doi, "title": w.get("title") or w.get("display_name") or "",
+        "authors": ", ".join(names[:5]) + (" et al." if len(names) > 5 else ""),
+        "authors_list": names, "year": w.get("publication_year"),
+        "venue": venue, "publisher": publisher,
+        "major": is_major_ee(venue, publisher), "type": w.get("type", ""),
+        "cited_by": w.get("cited_by_count", 0), "oa_url": oa,
+        "url": ploc.get("landing_page_url") or (("https://doi.org/" + doi) if doi else oa) or w.get("id"),
+        "abstract": (reconstruct_abstract(w.get("abstract_inverted_index")) or "")[:700],
+    }
+
+
+OPENALEX_SELECT = ("id,doi,title,display_name,publication_year,type,cited_by_count,"
+                   "authorships,primary_location,best_oa_location,open_access,"
+                   "abstract_inverted_index")
+
+
+def openalex_search(query, wtype):
+    url = ("https://api.openalex.org/works?per-page=40&mailto=research-workbench@example.com"
+           "&select=" + OPENALEX_SELECT + "&search=" + quote(query))
+    tf = FIND_TYPE_FILTER.get(wtype, "")
+    if tf:
+        url += "&filter=" + quote(tf, safe=":|")
+    data = http_get_json(url, timeout=22)
+    return [_openalex_item(w) for w in data.get("results", [])]
+
+
+def _crossref_item(it):
+    names = []
+    for a in (it.get("author") or []):
+        n = ((a.get("given", "") + " " + a.get("family", "")).strip() or a.get("name", ""))
+        if n:
+            names.append(clean_citation_text(n))
+    try:
+        year = it.get("issued", {}).get("date-parts", [[None]])[0][0]
+    except (IndexError, TypeError):
+        year = None
+    doi = it.get("DOI", "")
+    venue = clean_citation_text((it.get("container-title") or [""])[0])
+    publisher = classify_publisher(venue, it.get("publisher", ""))
+    return {
+        "doi": doi, "title": clean_citation_text((it.get("title") or [""])[0]),
+        "authors": ", ".join(names[:5]) + (" et al." if len(names) > 5 else ""),
+        "authors_list": names, "year": year, "venue": venue,
+        "publisher": publisher, "major": is_major_ee(venue, publisher),
+        "type": it.get("type", ""), "cited_by": it.get("is-referenced-by-count", 0),
+        "oa_url": None, "url": ("https://doi.org/" + doi) if doi else "",
+        "abstract": "", "authoritative": True,
+    }
+
+
+def crossref_search(query, wtype):
+    url = ("https://api.crossref.org/works?rows=25&select="
+           "DOI,title,author,issued,container-title,type,is-referenced-by-count,publisher"
+           "&query=" + quote(query))
+    req = urllib.request.Request(url, headers={"User-Agent": CITE_UA, "Accept": "application/json"})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        data = json.loads(r.read().decode("utf-8", "replace"))
+    return [_crossref_item(it) for it in data.get("message", {}).get("items", [])]
+
+
+DOI_RE = re.compile(r"10\.\d{4,9}/[^\s\"'<>]+", re.I)
+
+
+def find_doi(query):
+    m = DOI_RE.search(query or "")
+    return m.group(0).rstrip(".,;)]") if m else None
+
+
+def doi_lookup(doi):
+    """Resolve a DOI directly to one record, trying OpenAlex first for its
+    richer metadata and falling back to Crossref. Keyword search endpoints do
+    not match a raw DOI, so this is what makes pasting a DOI work."""
+    try:
+        data = http_get_json("https://api.openalex.org/works/doi:" + quote(doi, safe="/")
+                             + "?mailto=research-workbench@example.com&select=" + OPENALEX_SELECT,
+                             timeout=12)
+        if data and data.get("id"):
+            it = _openalex_item(data)
+            it["_via"] = "OpenAlex"
+            return it
+    except Exception:
+        pass
+    try:
+        req = urllib.request.Request("https://api.crossref.org/works/" + quote(doi, safe="/"),
+                                     headers={"User-Agent": CITE_UA, "Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=12) as r:
+            msg = json.loads(r.read().decode("utf-8", "replace")).get("message", {})
+        if msg and msg.get("DOI"):
+            it = _crossref_item(msg)
+            it["_via"] = "Crossref"
+            return it
+    except Exception:
+        pass
+    return None
+
+
+def semanticscholar_search(query, wtype):
+    fields = ("title,abstract,year,venue,authors,citationCount,publicationTypes,"
+              "externalIds,openAccessPdf,publicationVenue")
+    url = ("https://api.semanticscholar.org/graph/v1/paper/search?limit=25&fields="
+           + fields + "&query=" + quote(query))
+    data = http_get_json(url, timeout=18)
+    items = []
+    for w in (data.get("data") or []):
+        ext = w.get("externalIds") or {}
+        doi = (ext.get("DOI") or "").strip()
+        names = [a.get("name", "") for a in (w.get("authors") or []) if a.get("name")]
+        pv = w.get("publicationVenue") or {}
+        venue = w.get("venue") or (pv.get("name") if isinstance(pv, dict) else "") or ""
+        ptypes = w.get("publicationTypes") or []
+        if "ArXiv" in ext or (venue or "").lower().startswith("arxiv"):
+            wt = "preprint"
+        elif any(p == "Conference" for p in ptypes):
+            wt = "conference"
+        elif any(p in ("Book", "BookSection") for p in ptypes):
+            wt = "book"
+        else:
+            wt = "article"
+        oa = (w.get("openAccessPdf") or {}) or {}
+        publisher = classify_publisher(venue, "")
+        arxiv = ext.get("ArXiv")
+        items.append({
+            "doi": doi, "title": w.get("title") or "",
+            "authors": ", ".join(names[:5]) + (" et al." if len(names) > 5 else ""),
+            "authors_list": names, "year": w.get("year"), "venue": venue,
+            "publisher": publisher, "major": is_major_ee(venue, publisher),
+            "type": wt, "cited_by": w.get("citationCount", 0), "oa_url": oa.get("url"),
+            "url": ("https://doi.org/" + doi) if doi
+                   else ("https://arxiv.org/abs/" + arxiv if arxiv else None),
+            "abstract": (w.get("abstract") or "")[:700],
+        })
+    return items
+
+
+FIND_SOURCES = {
+    "openalex": [("OpenAlex", openalex_search)],
+    "crossref": [("Crossref", crossref_search)],
+    "semanticscholar": [("Semantic Scholar", semanticscholar_search)],
+    "all": [("OpenAlex", openalex_search), ("Semantic Scholar", semanticscholar_search),
+            ("Crossref", crossref_search)],
+}
+
 # Map source metadata to a BibTeX entry type when synthesizing an entry for a
 # record that has no DOI (so no citation service can format it).
 _BIBTYPE = {
@@ -667,6 +950,51 @@ def expand_tex_inputs(tex_path, seen=None, depth=0):
         return expand_tex_inputs(child, seen, depth + 1)
 
     return re.sub(r"\\(?:input|include)\s*\{([^}]*)\}", repl, text)
+
+
+LATEX_SECT_LEVELS = {"part": 0, "chapter": 1, "section": 2, "subsection": 3,
+                     "subsubsection": 4, "paragraph": 5, "subparagraph": 6}
+
+
+def tex_outline(path, root, content=None, seen=None, depth=0):
+    r"""Build a section outline for a LaTeX file, descending into \input and
+    \include so a main file's outline includes the sections written in its
+    section files. Each item carries its own file (workspace-relative) and the
+    line within that file, so a click opens the right file at the right line."""
+    if seen is None:
+        seen = set()
+    real = os.path.normcase(os.path.realpath(path))
+    if depth > 20 or real in seen:
+        return []
+    seen.add(real)
+    if content is None:
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                content = f.read()
+        except OSError:
+            return []
+    base = os.path.dirname(path)
+    rel = os.path.relpath(path, root) if path_allowed(path) else os.path.basename(path)
+    sect_re = re.compile(r"^\s*\\(part|chapter|section|subsection|subsubsection"
+                         r"|paragraph|subparagraph)\*?\s*\{(.+?)\}")
+    inp_re = re.compile(r"\\(?:input|include)\s*\{([^}]*)\}")
+    items = []
+    for i, raw in enumerate(content.split("\n"), 1):
+        line = re.sub(r"(?<!\\)%.*", "", raw)
+        sm = sect_re.match(line)
+        if sm:
+            items.append({"file": rel, "line": i, "kind": "§",
+                          "level": LATEX_SECT_LEVELS[sm.group(1)],
+                          "name": sm.group(2).strip()})
+        for im in inp_re.finditer(line):
+            name = im.group(1).strip()
+            if not name:
+                continue
+            cand = name if name.lower().endswith(".tex") else name + ".tex"
+            child = os.path.normpath(os.path.join(base, cand))
+            if path_allowed(child):
+                items.extend(tex_outline(child, root, None, seen, depth + 1))
+    return items
 
 
 def latex_word_count(text):
@@ -1573,6 +1901,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.api_search(q)
             elif route == "/api/find/search":
                 self.api_find_search(q)
+            elif route == "/api/find/library":
+                self.api_find_library(q)
             elif route == "/api/cite/search":
                 self.api_cite_search(q)
             elif route == "/api/cite/format":
@@ -1863,6 +2193,10 @@ class Handler(BaseHTTPRequestHandler):
                 self.api_todos(body)
             elif route == "/api/prose":
                 self.api_prose(body)
+            elif route == "/api/outline":
+                self.api_outline(body)
+            elif route == "/api/refindex":
+                self.api_refindex(body)
             elif route == "/api/compilelog":
                 self.api_compilelog(body)
             elif route == "/api/writingstats":
@@ -2475,6 +2809,19 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"ok": True, "file": os.path.basename(tex),
                     "issues": prose_issues(text)})
 
+    def api_outline(self, body):
+        r"""Return the section outline of a LaTeX file, following \input and
+        \include into its section files so the whole document appears."""
+        path = body.get("path", "")
+        if not path_allowed(path) or not path.lower().endswith(".tex"):
+            self._json({"error": "not a .tex file"}, 400)
+            return
+        content = body.get("content")
+        if not isinstance(content, str):
+            content = None
+        root = get_root() or os.path.dirname(path)
+        self._json({"ok": True, "items": tex_outline(path, root, content)})
+
     def api_compilelog(self, body):
         """Parse the .log from the last compile into a list of errors and
         warnings with file and line, for a clickable problems view."""
@@ -2556,81 +2903,146 @@ class Handler(BaseHTTPRequestHandler):
                     "goal": goal, "history": history})
 
     def api_find_search(self, q):
-        """Keyword search over scholarly works and books. OpenAlex is the
-        default because it covers articles, books, and preprints and returns
-        citation counts and open-access links. Crossref stays available for
-        DOI-first lookups."""
+        """Keyword search over scholarly works. A single source can be chosen,
+        or "all" queries OpenAlex, Semantic Scholar, and Crossref together,
+        de-duplicates by DOI or title, and ranks peer-reviewed work above
+        preprints. Only fields returned by each source are shown; nothing is
+        invented."""
         query = (q.get("q") or "").strip()
         if len(query) < 3:
             self._json({"items": []})
             return
-        source = q.get("source", "openalex")
+        source = q.get("source", "all")
         wtype = q.get("type", "all")
-        focus = q.get("focus", "")   # "ee" strict, "all" neutral, else boost EE first
-        if source == "crossref":
-            self.api_cite_search(q)
+        focus = q.get("focus", "")   # "ee" strict, "boost" EE first, else relevance
+        # A pasted DOI never matches keyword search, so resolve it directly and
+        # place that record first.
+        doi = find_doi(query)
+        doi_hit = doi_lookup(doi) if doi else None
+        pure_doi = bool(doi) and re.sub(r"\s+", "", query).lower() == re.sub(r"\s+", "", doi).lower()
+        results, errors = [], []
+        if not (pure_doi and doi_hit):
+            fetchers = FIND_SOURCES.get(source, FIND_SOURCES["all"])
+            with concurrent.futures.ThreadPoolExecutor(max_workers=len(fetchers)) as ex:
+                futs = {ex.submit(fn, query, wtype): name for name, fn in fetchers}
+                done, not_done = concurrent.futures.wait(futs, timeout=25)
+                for fut in done:
+                    name = futs[fut]
+                    try:
+                        results.append((name, fut.result() or []))
+                    except Exception as e:
+                        errors.append(f"{name}: {e}")
+                for fut in not_done:
+                    fut.cancel()
+        if doi_hit:
+            doi_hit["_doi_exact"] = True
+            results.insert(0, (doi_hit.get("_via", "DOI"), [doi_hit]))
+        if not results:
+            self._json({"error": "search failed: " + ("; ".join(errors) or "no response")}, 502)
             return
-        select = ("id,doi,title,display_name,publication_year,type,cited_by_count,"
-                  "authorships,primary_location,best_oa_location,open_access,"
-                  "abstract_inverted_index")
-        # Fetch a wider set so the major-venue boost and filter have material.
-        url = ("https://api.openalex.org/works?per-page=40&mailto=research-workbench@example.com"
-               "&select=" + select + "&search=" + quote(query))
-        tf = FIND_TYPE_FILTER.get(wtype, "")
-        if tf:
-            url += "&filter=" + quote(tf, safe=":|")
-        try:
-            data = http_get_json(url, timeout=25)
-        except Exception as e:
-            self._json({"error": f"search failed: {e}"}, 502)
-            return
-        items = []
-        for w in data.get("results", []):
-            authorships = w.get("authorships", []) or []
-            names = [a.get("author", {}).get("display_name", "")
-                     for a in authorships if a.get("author")]
-            names = [n for n in names if n]
-            author_str = ", ".join(names[:5]) + (" et al." if len(names) > 5 else "")
-            ploc = w.get("primary_location") or {}
-            source_obj = ploc.get("source") or {}
-            venue = source_obj.get("display_name", "") or ""
-            host_org = source_obj.get("host_organization_name", "") or ""
-            oa = (w.get("open_access") or {}).get("oa_url")
-            best = w.get("best_oa_location") or {}
-            oa = oa or best.get("pdf_url")
-            landing = ploc.get("landing_page_url")
-            doi = (w.get("doi") or "").replace("https://doi.org/", "")
-            abstract = reconstruct_abstract(w.get("abstract_inverted_index"))
-            publisher = classify_publisher(venue, host_org)
-            items.append({
-                "doi": doi,
-                "title": w.get("title") or w.get("display_name") or "",
-                "authors": author_str,
-                "authors_list": names,
-                "year": w.get("publication_year"),
-                "venue": venue,
-                "publisher": publisher,
-                "major": is_major_ee(venue, publisher),
-                "type": w.get("type", ""),
-                "cited_by": w.get("cited_by_count", 0),
-                "oa_url": oa,
-                "url": landing or (("https://doi.org/" + doi) if doi else oa) or w.get("id"),
-                "abstract": abstract[:700],
-            })
+        merged = merge_items(results)
+        if wtype and wtype != "all":
+            want = "article" if wtype == "article" else wtype
+            merged = [it for it in merged if it.get("_doi_exact")
+                      or coarse_type(it.get("type")) == want
+                      or (wtype == "article" and coarse_type(it.get("type")) == "conference")]
         if focus == "ee":
-            # Strict: only major power/EE venues (IEEE, Elsevier, IET, and peers).
-            items = [it for it in items if it["major"]]
-        elif focus == "all":
-            # Neutral: keep OpenAlex's own relevance order, no venue ranking.
-            pass
-        else:
-            # Default "boost": stable sort so major power/EE venues surface first
-            # while each group keeps OpenAlex's relevance order.
-            items.sort(key=lambda it: not it["major"])
-        items = items[:18]
-        # Correct author names against the authoritative publisher records.
-        enrich_authors_from_crossref(items)
-        self._json({"items": items, "source": "openalex"})
+            merged = [it for it in merged if it.get("_doi_exact") or it.get("major")]
+        merged.sort(key=lambda it: (0 if it.get("_doi_exact") else 1,
+                                    -round(score_item(it, focus, query), 1),
+                                    it.get("_rank", 9999)))
+        merged = merged[:20]
+        enrich_authors_from_crossref(merged)
+        searched = list(dict.fromkeys(name for name, _ in results))
+        for it in merged:
+            it["sources"] = sorted(it.get("sources", []))
+            it["preprint"] = is_preprint(it)
+            for k in ("_rank", "_srcrank", "_doi_exact", "_via"):
+                it.pop(k, None)
+        self._json({"items": merged, "source": source,
+                    "searched": searched, "partial": errors or None})
+
+    def _library_items(self):
+        """Every paper already in the workspace .bib files, as finder records
+        carrying their citation key, so the library can list what the project
+        already cites."""
+        root = get_root()
+        items, seen = [], set()
+        if not root:
+            return items
+        clean = lambda v: re.sub(r"[{}]", "", v).strip().strip('"').strip() if v else ""
+        for fp in walk_workspace(root):
+            if not fp.lower().endswith(".bib"):
+                continue
+            try:
+                with open(fp, "r", encoding="utf-8", errors="replace") as f:
+                    parsed = parse_bib(f.read())
+            except OSError:
+                continue
+            if not parsed:
+                continue
+            relbib = os.path.relpath(fp, root)
+            for e in parsed[1]:
+                key = e["key"]
+                if not key or key.lower() in seen:
+                    continue
+                seen.add(key.lower())
+                fld = {k: clean(v) for k, v in e["fields"]}
+                names = [a.strip() for a in re.split(r"\s+and\s+", fld.get("author", ""))
+                         if a.strip()]
+                doi = fld.get("doi", "").replace("https://doi.org/", "").replace("http://doi.org/", "")
+                venue = fld.get("journal") or fld.get("booktitle") or fld.get("publisher") or ""
+                publisher = classify_publisher(venue, fld.get("publisher", ""))
+                items.append({
+                    "doi": doi, "title": fld.get("title", ""),
+                    "authors": ", ".join(names[:5]) + (" et al." if len(names) > 5 else ""),
+                    "authors_list": names, "year": fld.get("year", ""), "venue": venue,
+                    "publisher": publisher, "major": is_major_ee(venue, publisher),
+                    "type": e["type"], "cited_by": None, "oa_url": None,
+                    "url": fld.get("url") or (("https://doi.org/" + doi) if doi else ""),
+                    "abstract": fld.get("abstract", ""), "key": key,
+                    "bibfile": relbib, "cited": True,
+                })
+        items.sort(key=lambda it: str(it.get("year") or ""), reverse=True)
+        return items
+
+    def api_find_library(self, q):
+        """List the papers already cited in the workspace .bib files."""
+        items = self._library_items()
+        for it in items:
+            it["preprint"] = is_preprint(it)
+            it["sources"] = ["references.bib"]
+        self._json({"items": items, "count": len(items)})
+
+    def api_refindex(self, body):
+        """Write a human-readable Markdown index of the cited papers to the
+        workspace, so the project keeps a browsable list of its references with
+        links to reach each paper later."""
+        root = get_root()
+        if not root:
+            self._json({"error": "open a workspace first"}, 400)
+            return
+        items = self._library_items()
+        if not items:
+            self._json({"error": "no references found in the workspace .bib files"}, 400)
+            return
+        lines = ["# References index", "",
+                 f"{len(items)} cited works in this project. Generated by Beacon.", ""]
+        for it in items:
+            meta = "  ".join(p for p in (it.get("authors"), str(it.get("year") or ""),
+                                         it.get("venue")) if p)
+            lines.append(f"- **{it['title'] or '(untitled)'}**  \n"
+                         f"  `{it['key']}` — {meta}"
+                         + (f"  \n  <{it['url']}>" if it.get("url") else ""))
+        path = os.path.join(root, "references_index.md")
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines) + "\n")
+        except OSError as e:
+            self._json({"error": str(e)}, 500)
+            return
+        self._json({"ok": True, "path": path, "count": len(items),
+                    "name": os.path.basename(path)})
 
     def api_find_bibtex(self, body):
         """Return a BibTeX entry for a finder item. Uses the real DOI record
