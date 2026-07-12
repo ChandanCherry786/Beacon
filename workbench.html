@@ -505,6 +505,7 @@ html[data-theme="light"] .overlay { background:rgba(70,60,40,.35); }
       <button class="side-tab active" id="filestab">Files</button>
       <button class="side-tab" id="searchtab">Search</button>
       <button class="iconbtn" id="newfilebtn" title="New file in the workspace root">+</button>
+      <button class="iconbtn" id="newfolderbtn" title="New folder in the workspace root">▤</button>
       <button class="iconbtn" id="refreshbtn" title="Refresh the file tree">⟳</button>
     </div>
     <div id="treewrap" class="show"><div id="treebody"><div class="tree-empty">Choose a folder to open.</div></div></div>
@@ -1094,6 +1095,10 @@ $("newfilebtn").addEventListener("click", () => {
   if (!state.root) return;
   promptModal("New file in workspace root", "untitled.tex", name => fileOp("new_file", state.root, name, true));
 });
+$("newfolderbtn").addEventListener("click", () => {
+  if (!state.root) return;
+  promptModal("New folder in workspace root", "folder", name => fileOp("new_folder", state.root, name));
+});
 
 /* tree context menu */
 $("treebody").addEventListener("contextmenu", ev => {
@@ -1112,6 +1117,17 @@ $("treebody").addEventListener("contextmenu", ev => {
   const dirForNew = isDir ? targetPath : targetPath.slice(0, targetPath.lastIndexOf("\\"));
   add("New file…", () => promptModal("New file", "untitled.tex", n => fileOp("new_file", dirForNew, n, true)));
   add("New folder…", () => promptModal("New folder", "folder", n => fileOp("new_folder", dirForNew, n)));
+  if (row && !isDir) {
+    const low = targetPath.toLowerCase();
+    const acts = [];
+    if (low.endsWith(".ipynb")) acts.push(["Run notebook", () => runNotebook(targetPath)]);
+    if (low.endsWith(".bib")) acts.push(["Tidy & dedupe (.bib)", () => bibTidy(targetPath)]);
+    if (low.endsWith(".py")) acts.push(["Format (Ruff/Black)", () => doFormat(targetPath)]);
+    if (acts.length) {
+      m.insertAdjacentHTML("beforeend", '<div class="sep"></div>');
+      acts.forEach(a => add(a[0], a[1]));
+    }
+  }
   if (row) {
     const base = targetPath.split("\\").pop();
     m.insertAdjacentHTML("beforeend", '<div class="sep"></div>');
@@ -1908,7 +1924,14 @@ $("toolsbtn").addEventListener("click", ev => {
     b.addEventListener("click", () => { closeMenus(); fn(); });
     m.appendChild(b);
   };
+  add("Word count (LaTeX)", wordCount);
+  add("Format Python file (Ruff/Black)", formatPython);
+  m.insertAdjacentHTML("beforeend", '<div class="sep"></div>');
   add("Export LaTeX to Word (.docx)", exportDocx);
+  add("Export Markdown to Word (.docx)", () => exportMd("docx"));
+  add("Export Markdown to PDF", () => exportMd("pdf"));
+  m.insertAdjacentHTML("beforeend", '<div class="sep"></div>');
+  add("Clean build files (.aux, .log, .bbl, …)", cleanBuild);
   add("Open PowerShell window", () => api.post("/api/extterm", {}).then(r => r.error ? toast(r.error, "err") : toast("Opened PowerShell")));
   add("Reveal workspace in Explorer", () => { if (state.root) api.post("/api/reveal", {path: state.root}); });
   const rect = $("toolsbtn").getBoundingClientRect();
@@ -1932,6 +1955,109 @@ async function exportDocx() {
       toast("Word export failed — see Output", "err", 6000);
     }
   });
+}
+function fmtBytes(n) {
+  if (n < 1024) return n + " B";
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+  return (n / 1024 / 1024).toFixed(1) + " MB";
+}
+async function wordCount() {
+  const t = state.tabs[state.active];
+  const texPath = (t && t.kind === "text" && t.path.toLowerCase().endsWith(".tex")) ? t.path : null;
+  if (!texPath) { toast("Open a .tex file first", "err"); return; }
+  if (t.dirty) await saveActive();
+  toast("Counting words…");
+  const r = await api.post("/api/wordcount", {path: texPath});
+  if (r.error) { toast(r.error, "err", 6000); return; }
+  showDock("out");
+  logJob("info", "── word count: " + r.file + " ──");
+  if (r.note) logJob("info", r.note);
+  logJob("", "words (body text estimate): " + r.words.toLocaleString());
+  logJob("", "characters, no spaces: " + r.chars.toLocaleString());
+  logJob("", "figures/tables: " + r.floats + "    display equations: " + r.display_math + "    inline math: " + r.inline_math);
+  logJob("info", "estimate follows \\input/\\include and excludes commands, math, and comments");
+  toast("≈ " + r.words.toLocaleString() + " words");
+}
+async function cleanBuild() {
+  if (!state.root) { toast("Open a workspace first", "err"); return; }
+  confirmModal("Clean build files",
+    "Remove regenerable build artifacts (.aux, .log, .bbl, .toc, .out, .synctex.gz, .pyc, …) from the workspace? Source files such as .tex, .py, and .bib are not touched.",
+    async () => {
+      toast("Cleaning…");
+      const r = await api.post("/api/clean", {});
+      if (r.error) { toast(r.error, "err", 6000); return; }
+      if (r.count === 0) { toast("No build files to remove"); return; }
+      showDock("out");
+      logJob("info", "── cleaned " + r.count + " build file(s), " + fmtBytes(r.bytes) + " freed ──");
+      r.files.forEach(f => logJob("", "removed " + f));
+      if (r.count > r.files.length) logJob("", "… and " + (r.count - r.files.length) + " more");
+      loadTree();
+      toast("Removed " + r.count + " build file(s), " + fmtBytes(r.bytes) + " freed");
+    });
+}
+async function saveIfOpenDirty(path) {
+  const t = state.tabs.find(x => x.path === path && x.kind === "text" && x.dirty);
+  if (!t) return;
+  if (t === state.tabs[state.active]) await saveActive(); else await saveTab(t);
+}
+async function doFormat(path) {
+  await saveIfOpenDirty(path);
+  const r = await api.post("/api/format", {path});
+  if (r.error) { toast(r.error, "err", 6000); return; }
+  showDock("out");
+  followJob(r.job, async rc => {
+    if (rc === 0) { await reloadActiveIfChanged(); toast("Formatted with " + r.tool); }
+    else toast("Formatting failed, see Output", "err", 5000);
+  });
+}
+function formatPython() {
+  const t = state.tabs[state.active];
+  const pyPath = (t && t.kind === "text" && t.path.toLowerCase().endsWith(".py")) ? t.path : null;
+  if (!pyPath) { toast("Open a .py file first", "err"); return; }
+  doFormat(pyPath);
+}
+async function exportMd(to) {
+  const t = state.tabs[state.active];
+  const mdPath = (t && t.kind === "text" && /\.(md|markdown)$/i.test(t.path)) ? t.path : null;
+  if (!mdPath) { toast("Open a Markdown (.md) file first", "err"); return; }
+  await saveIfOpenDirty(mdPath);
+  toast("Converting with Pandoc…");
+  const r = await api.post("/api/export/md", {path: mdPath, to});
+  if (r.error) { toast(r.error, "err", 6000); return; }
+  showDock("out");
+  followJob(r.job, rc => {
+    if (rc === 0) {
+      toast("Exported " + r.out.split("\\").pop() + " — opening its folder");
+      api.post("/api/reveal", {path: r.out});
+      loadTree();
+    } else toast(to.toUpperCase() + " export failed — see Output", "err", 6000);
+  });
+}
+async function runNotebook(path) {
+  await saveIfOpenDirty(path);
+  toast("Executing notebook…");
+  const r = await api.post("/api/run", {path});
+  if (r.error) { toast(r.error, "err", 6000); return; }
+  showDock("out");
+  followJob(r.job, rc => {
+    if (rc === 0) { loadTree(); toast("Notebook executed — outputs saved in place"); }
+    else toast("Notebook run failed with exit " + rc + ", see Output", "err", 5000);
+  });
+}
+async function bibTidy(path) {
+  await saveIfOpenDirty(path);
+  const r = await api.post("/api/bibtidy", {path});
+  if (r.error) { toast(r.error, "err", 6000); return; }
+  showDock("out");
+  logJob("info", "── bib tidy: " + path.split("\\").pop() + " ──");
+  logJob("", "entries: " + r.entries_in + " in, " + r.entries_out + " kept");
+  if (r.removed_keys.length) logJob("", "removed duplicate keys: " + r.removed_keys.join(", "));
+  r.dup_dois.forEach(d => logJob("info", "same DOI in '" + d[0] + "' and '" + d[1] + "' (" + d[2] + ") — both kept"));
+  logJob("info", "original backed up as " + r.backup);
+  await reloadActiveIfChanged();
+  loadTree();
+  toast("Tidied: " + r.entries_out + " entries kept"
+    + (r.removed_keys.length ? ", " + r.removed_keys.length + " duplicate removed" : ""));
 }
 let lastCompiledPdf = null;
 function showPreview(pdfPath) {

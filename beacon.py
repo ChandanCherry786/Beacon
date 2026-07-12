@@ -629,6 +629,189 @@ def resolve_main_tex(tex):
     return chosen, note
 
 
+def expand_tex_inputs(tex_path, seen=None, depth=0):
+    """Inline the files pulled in by \\input and \\include so a paper split
+    across many files counts as one document. Bounded in depth and guarded
+    against cycles; only files inside the workspace are followed."""
+    if seen is None:
+        seen = set()
+    real = os.path.normcase(os.path.realpath(tex_path))
+    if depth > 15 or real in seen or not os.path.isfile(tex_path):
+        return ""
+    seen.add(real)
+    base = os.path.dirname(tex_path)
+    try:
+        with open(tex_path, "r", encoding="utf-8", errors="replace") as f:
+            text = f.read()
+    except OSError:
+        return ""
+    text = re.sub(r"(?<!\\)%.*", "", text)  # drop comments before following inputs
+
+    def repl(m):
+        name = m.group(1).strip()
+        if not name:
+            return " "
+        cand = name if name.lower().endswith(".tex") else name + ".tex"
+        child = os.path.normpath(os.path.join(base, cand))
+        if not path_allowed(child):
+            return " "
+        return expand_tex_inputs(child, seen, depth + 1)
+
+    return re.sub(r"\\(?:input|include)\s*\{([^}]*)\}", repl, text)
+
+
+def latex_word_count(text):
+    """Estimate word, character, figure/table, and equation counts of LaTeX
+    source. This strips comments, math, and markup with regular expressions
+    rather than parsing, so the word figure is an approximation for checking
+    a draft against a journal limit, not an exact count."""
+    m = re.search(r"\\begin\{document\}(.*)\\end\{document\}", text, re.DOTALL)
+    body = m.group(1) if m else text
+    body = re.sub(r"(?<!\\)%.*", "", body)
+    n_floats = len(re.findall(r"\\begin\{(?:figure|table|wrapfigure|sidewaystable)\*?\}", body))
+    n_display = 0
+    for env in ("equation", "align", "gather", "multline", "eqnarray",
+                "displaymath", "alignat", "flalign"):
+        n_display += len(re.findall(r"\\begin\{" + env + r"\*?\}", body))
+    strip_envs = ("equation", "align", "aligned", "gather", "multline",
+                  "eqnarray", "displaymath", "alignat", "flalign", "math",
+                  "figure", "table", "wrapfigure", "sidewaystable", "tabular",
+                  "thebibliography", "lstlisting", "verbatim", "tikzpicture",
+                  "minted")
+    for env in strip_envs:
+        body = re.sub(r"\\begin\{" + env + r"\*?\}.*?\\end\{" + env + r"\*?\}",
+                      " ", body, flags=re.DOTALL)
+    n_inline = len(re.findall(r"\\\(", body)) + body.count("$$") + \
+        (len(re.findall(r"(?<!\\)\$", body)) - 2 * body.count("$$")) // 2
+    body = re.sub(r"\\\[.*?\\\]", " ", body, flags=re.DOTALL)
+    body = re.sub(r"\\\(.*?\\\)", " ", body, flags=re.DOTALL)
+    body = re.sub(r"(?<!\\)\$\$.*?\$\$", " ", body, flags=re.DOTALL)
+    body = re.sub(r"(?<!\\)\$.*?(?<!\\)\$", " ", body, flags=re.DOTALL)
+    # commands whose braced argument carries no readable prose
+    body = re.sub(r"\\(?:label|ref|eqref|cref|Cref|autoref|pageref|nameref|"
+                  r"cite[a-zA-Z]*|includegraphics|input|include|bibliography|"
+                  r"bibliographystyle|usepackage|documentclass|newcommand|"
+                  r"renewcommand|providecommand|def|setlength|geometry|"
+                  r"hypersetup|url|graphicspath)\s*(?:\[[^\]]*\])?(?:\{[^{}]*\})?",
+                  " ", body)
+    body = re.sub(r"\\[A-Za-z@]+\*?", " ", body)   # remaining control words
+    body = re.sub(r"\\[^A-Za-z]", " ", body)       # control symbols: \\, \&, \%
+    body = body.translate({ord(c): " " for c in "{}[]~^_"})
+    words = re.findall(r"[0-9A-Za-zÀ-ɏ][0-9A-Za-zÀ-ɏ'\-]*", body)
+    return {"words": len(words), "chars": sum(len(w) for w in words),
+            "floats": n_floats, "display_math": n_display,
+            "inline_math": max(0, n_inline)}
+
+
+def _bib_split_fields(s):
+    """Split the body of a BibTeX entry (after the citation key) into an
+    ordered list of (field_name, value) pairs, respecting brace- and
+    quote-delimited values so a comma inside a title does not split it."""
+    fields = []
+    i, n = 0, len(s)
+    while i < n:
+        while i < n and s[i] in " \t\r\n,":
+            i += 1
+        start = i
+        while i < n and (s[i].isalnum() or s[i] in "_-+.:"):
+            i += 1
+        name = s[start:i].strip().lower()
+        while i < n and s[i] in " \t\r\n":
+            i += 1
+        if i >= n or s[i] != "=":
+            break
+        i += 1
+        while i < n and s[i] in " \t\r\n":
+            i += 1
+        if i < n and s[i] == "{":
+            depth, vstart = 0, i
+            while i < n:
+                if s[i] == "{":
+                    depth += 1
+                elif s[i] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        i += 1
+                        break
+                i += 1
+            value = s[vstart:i]
+        elif i < n and s[i] == '"':
+            vstart = i
+            i += 1
+            while i < n and s[i] != '"':
+                i += 1
+            i += 1
+            value = s[vstart:i]
+        else:
+            vstart = i
+            while i < n and s[i] != ",":
+                i += 1
+            value = s[vstart:i].strip()
+        if name:
+            fields.append((name, value.strip()))
+    return fields
+
+
+def parse_bib(text):
+    """Parse BibTeX into (preamble_chunks, entries). Each entry is a dict with
+    type, key, and an ordered list of (field, value). @string/@preamble/@comment
+    blocks are preserved verbatim. Returns None when the outer brace structure
+    is unbalanced so a malformed file is never rewritten."""
+    preamble, entries = [], []
+    i, n = 0, len(text)
+    while True:
+        at = text.find("@", i)
+        if at == -1:
+            break
+        j = at + 1
+        while j < n and text[j].isalpha():
+            j += 1
+        etype = text[at + 1:j].lower()
+        while j < n and text[j] in " \t\r\n":
+            j += 1
+        if j >= n or text[j] not in "{(":
+            i = at + 1
+            continue
+        opener = text[j]
+        openc, closec = ("{", "}") if opener == "{" else ("(", ")")
+        depth, k = 0, j
+        while k < n:
+            c = text[k]
+            if c == openc:
+                depth += 1
+            elif c == closec:
+                depth -= 1
+                if depth == 0:
+                    break
+            k += 1
+        if k >= n or depth != 0:
+            return None
+        body = text[j + 1:k]
+        raw = text[at:k + 1]
+        i = k + 1
+        if etype in ("string", "preamble", "comment"):
+            preamble.append(raw)
+            continue
+        comma = body.find(",")
+        if comma == -1:
+            key, fields = body.strip(), []
+        else:
+            key, fields = body[:comma].strip(), _bib_split_fields(body[comma + 1:])
+        entries.append({"type": etype, "key": key, "fields": fields})
+    return preamble, entries
+
+
+def format_bib_entry(e):
+    """Render one parsed entry with lowercased field names aligned on the
+    equals sign and two-space indentation."""
+    width = max((len(name) for name, _ in e["fields"]), default=0)
+    lines = ["@" + e["type"] + "{" + e["key"] + ","]
+    for name, value in e["fields"]:
+        lines.append("  " + name.ljust(width) + " = " + value + ",")
+    lines.append("}")
+    return "\n".join(lines)
+
+
 def run_step(job_id, cmd, cwd, timeout, on_line=None):
     """Run one command to completion inside a job, streaming its output and
     honoring cancellation. Returns the exit code, or -1 on failure/timeout."""
@@ -1546,6 +1729,16 @@ class Handler(BaseHTTPRequestHandler):
                 self.api_compile(body)
             elif route == "/api/export/docx":
                 self.api_export_docx(body)
+            elif route == "/api/wordcount":
+                self.api_wordcount(body)
+            elif route == "/api/clean":
+                self.api_clean(body)
+            elif route == "/api/format":
+                self.api_format(body)
+            elif route == "/api/export/md":
+                self.api_export_md(body)
+            elif route == "/api/bibtidy":
+                self.api_bibtidy(body)
             elif route == "/api/gitop":
                 self.api_gitop(body)
             elif route == "/api/git/connect":
@@ -1826,6 +2019,177 @@ class Handler(BaseHTTPRequestHandler):
                  + (f" (with {bib})" if bib else ""))
         stream_job(job_id, cmd, folder, timeout=300)
         self._json({"job": job_id, "docx": os.path.join(folder, docx)})
+
+    def api_wordcount(self, body):
+        """Estimate the word count of a LaTeX document, following \\input and
+        \\include so a multi-file paper counts as a whole."""
+        tex = body.get("path", "")
+        if not path_allowed(tex) or not tex.lower().endswith(".tex"):
+            self._json({"error": "select a .tex file"}, 400)
+            return
+        tex, note = resolve_main_tex(tex)
+        text = expand_tex_inputs(tex)
+        if not text:
+            self._json({"error": "could not read the document"}, 500)
+            return
+        stats = latex_word_count(text)
+        stats.update({"ok": True, "file": os.path.basename(tex), "note": note})
+        self._json(stats)
+
+    def api_clean(self, body):
+        """Remove regenerable build artifacts (LaTeX .aux/.bbl/.toc/…, a .log
+        that sits beside a .tex of the same name, and .pyc) from the workspace
+        so the tree stays readable. Source files are never touched."""
+        root = get_root()
+        if not root:
+            self._json({"error": "open a workspace first"}, 400)
+            return
+        removed, freed = [], 0
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames
+                           if d not in SKIP_DIRS and not d.startswith(".")]
+            for name in filenames:
+                low = name.lower()
+                is_artifact = low.endswith(ARTIFACT_EXTS)
+                is_tex_log = (low.endswith(".log")
+                              and os.path.isfile(os.path.join(
+                                  dirpath, os.path.splitext(name)[0] + ".tex")))
+                if not (is_artifact or is_tex_log):
+                    continue
+                full = os.path.join(dirpath, name)
+                if not path_allowed(full):
+                    continue
+                try:
+                    size = os.path.getsize(full)
+                    os.remove(full)
+                    removed.append(os.path.relpath(full, root))
+                    freed += size
+                except OSError:
+                    pass
+        self._json({"ok": True, "count": len(removed), "bytes": freed,
+                    "files": removed[:200]})
+
+    def api_format(self, body):
+        """Reformat a Python file with Ruff (preferred) or Black, whichever is
+        installed in the configured environment."""
+        path = body.get("path", "")
+        if not path_allowed(path) or not path.lower().endswith(".py"):
+            self._json({"error": "select a .py file"}, 400)
+            return
+        name = os.path.basename(path)
+        if '"' in name:
+            self._json({"error": "file name contains a quote"}, 400)
+            return
+        py = get_settings().get("python_path", "")
+        if not py or not os.path.isfile(py):
+            py = "python"
+        folder = os.path.dirname(path)
+        if run_cmd(f'"{py}" -m ruff --version', folder, timeout=20)[0] == 0:
+            tool, cmd = "ruff", f'"{py}" -m ruff format "{name}"'
+        elif run_cmd(f'"{py}" -m black --version', folder, timeout=20)[0] == 0:
+            tool, cmd = "black", f'"{py}" -m black "{name}"'
+        else:
+            self._json({"error": "Neither Ruff nor Black is installed in the "
+                                 "configured environment. Install one with "
+                                 "'pip install ruff' (or 'pip install black'), "
+                                 "then retry."}, 400)
+            return
+        job_id = new_job()
+        job_emit(job_id, "info", f"{tool}: formatting {name}")
+        stream_job(job_id, cmd, folder, timeout=120)
+        self._json({"job": job_id, "tool": tool})
+
+    def api_export_md(self, body):
+        """Convert a Markdown file to Word (.docx) or PDF with Pandoc, wiring in
+        a workspace .bib through citeproc when one is present."""
+        md = body.get("path", "")
+        to = (body.get("to") or "docx").lower()
+        if to not in ("docx", "pdf"):
+            self._json({"error": "unsupported target"}, 400)
+            return
+        if not path_allowed(md) or not md.lower().endswith((".md", ".markdown")):
+            self._json({"error": "select a Markdown (.md) file"}, 400)
+            return
+        pandoc = find_pandoc()
+        if not pandoc:
+            self._json({"error": "Pandoc is not installed. Install it from "
+                                 "pandoc.org (or 'winget install pandoc'), then "
+                                 "try again."}, 400)
+            return
+        name = os.path.basename(md)
+        if '"' in name:
+            self._json({"error": "file name contains a quote"}, 400)
+            return
+        folder = os.path.dirname(md)
+        out = os.path.splitext(name)[0] + "." + to
+        bib = next((f for f in os.listdir(folder) if f.lower().endswith(".bib")), None)
+        cmd = f'"{pandoc}" "{name}" -o "{out}" --standalone --resource-path=.'
+        if bib and '"' not in bib:
+            cmd += f' --citeproc --bibliography "{bib}"'
+        job_id = new_job()
+        job_emit(job_id, "info", f"pandoc: {name} -> {out}"
+                 + (f" (with {bib})" if bib else ""))
+        stream_job(job_id, cmd, folder, timeout=300)
+        self._json({"job": job_id, "out": os.path.join(folder, out)})
+
+    def api_bibtidy(self, body):
+        """Normalize a .bib file: drop entries with duplicate citation keys,
+        sort the rest by key, and align fields. The original is copied to a
+        .bak first, and a file whose braces do not balance is left untouched."""
+        path = body.get("path", "")
+        if not path_allowed(path) or not path.lower().endswith(".bib"):
+            self._json({"error": "select a .bib file"}, 400)
+            return
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                text = f.read()
+        except OSError as e:
+            self._json({"error": str(e)}, 500)
+            return
+        parsed = parse_bib(text)
+        if parsed is None:
+            self._json({"error": "the .bib has unbalanced braces; not modified"}, 400)
+            return
+        preamble, entries = parsed
+        if not entries:
+            self._json({"error": "no BibTeX entries found"}, 400)
+            return
+        seen, kept, removed_keys, doi_map, dup_dois = set(), [], [], {}, []
+        for e in entries:
+            kl = e["key"].lower()
+            if kl in seen:
+                removed_keys.append(e["key"])
+                continue
+            seen.add(kl)
+            kept.append(e)
+            doi = ""
+            for name, value in e["fields"]:
+                if name == "doi":
+                    doi = re.sub(r"[{}\"\s]", "", value).lower()
+                    doi = doi.replace("https://doi.org/", "").replace("http://doi.org/", "")
+                    break
+            if doi:
+                if doi in doi_map:
+                    dup_dois.append([doi_map[doi], e["key"], doi])
+                else:
+                    doi_map[doi] = e["key"]
+        kept.sort(key=lambda e: e["key"].lower())
+        chunks = []
+        if preamble:
+            chunks.append("\n".join(preamble))
+        chunks.append("\n\n".join(format_bib_entry(e) for e in kept))
+        new_text = "\n\n".join(chunks).rstrip() + "\n"
+        try:
+            with open(path + ".bak", "w", encoding="utf-8") as f:
+                f.write(text)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(new_text)
+        except OSError as e:
+            self._json({"error": str(e)}, 500)
+            return
+        self._json({"ok": True, "entries_in": len(entries), "entries_out": len(kept),
+                    "removed_keys": removed_keys, "dup_dois": dup_dois,
+                    "backup": os.path.basename(path + ".bak")})
 
     def api_find_search(self, q):
         """Keyword search over scholarly works and books. OpenAlex is the
@@ -2250,8 +2614,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def api_run(self, body):
         path = body.get("path", "")
-        if not path_allowed(path) or not path.lower().endswith(".py"):
-            self._json({"error": "select a .py file"}, 400)
+        low = path.lower()
+        if not path_allowed(path) or not low.endswith((".py", ".ipynb")):
+            self._json({"error": "select a .py or .ipynb file"}, 400)
             return
         name = os.path.basename(path)
         if '"' in name:
@@ -2260,9 +2625,22 @@ class Handler(BaseHTTPRequestHandler):
         py = get_settings().get("python_path", "")
         if not py or not os.path.isfile(py):
             py = "python"
+        folder = os.path.dirname(path)
+        if low.endswith(".ipynb"):
+            if run_cmd(f'"{py}" -m jupyter --version', folder, timeout=20)[0] != 0:
+                self._json({"error": "Jupyter is not installed in the configured "
+                                     "environment. Install it with 'pip install "
+                                     "jupyter nbconvert', then retry."}, 400)
+                return
+            cmd = (f'"{py}" -m jupyter nbconvert --to notebook --execute --inplace '
+                   f'--ExecutePreprocessor.timeout=600 "{name}"')
+            info = f"jupyter: executing {name} (outputs saved in place)"
+        else:
+            cmd = f'"{py}" "{name}"'
+            info = f"{os.path.basename(py)} {name}"
         job_id = new_job()
-        job_emit(job_id, "info", f"{os.path.basename(py)} {name}")
-        stream_job(job_id, f'"{py}" "{name}"', os.path.dirname(path), timeout=1800)
+        job_emit(job_id, "info", info)
+        stream_job(job_id, cmd, folder, timeout=1800)
         self._json({"job": job_id})
 
     def api_term(self, body):

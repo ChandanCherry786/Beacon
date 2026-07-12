@@ -8,11 +8,11 @@
 #  Steps:
 #    1. Python 3.9+            (required to run the app)
 #    2. A local virtual env    (.venv, optional but recommended)
-#    3. Python packages        (pywinpty, for the real interactive terminal)
+#    3. Python packages        (pywinpty terminal, Ruff formatter, Jupyter)
 #    4. Git                    (for the git and sync features)
 #    5. A LaTeX distribution   (TinyTeX, for compiling papers)
 #    6. Claude Code CLI        (optional, for the Claude assistant)
-#    7. Pandoc                 (optional, for LaTeX to Word export)
+#    7. Pandoc                 (optional, Word/PDF export from LaTeX or Markdown)
 #    8. Ollama                 (optional, free local AI models)
 #
 #  Run it by double clicking setup.bat, or in PowerShell:
@@ -76,9 +76,11 @@ if (Test-Path $venvPy) {
 Section 3 "Python packages"
 $py = "python"
 if (Test-Path $venvPy) { $py = $venvPy }
+& $py -m pip install --quiet --upgrade pip 2>$null
+
+# pywinpty: real interactive terminal (optional)
 Write-Host "$dot Installing pywinpty (enables the full interactive terminal; optional)…"
 try {
-    & $py -m pip install --quiet --upgrade pip 2>$null
     & $py -m pip install --quiet pywinpty 2>$null
     & $py -c "import winpty" 2>$null
     if ($LASTEXITCODE -eq 0) {
@@ -88,6 +90,38 @@ try {
     }
 } catch {
     Write-Host "$dot Could not install pywinpty. The app falls back to the line terminal." -ForegroundColor Yellow
+}
+
+# Ruff: powers Tools > Format Python file (small, always installed)
+Write-Host "$dot Installing Ruff (enables Tools > Format Python file)…"
+try {
+    & $py -m pip install --quiet ruff 2>$null
+    & $py -m ruff --version 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "$dot $ok Ruff installed (Python formatting enabled)"
+    } else {
+        Write-Host "$dot Ruff not installed. Install later with '$py -m pip install ruff' (or use Black)." -ForegroundColor Yellow
+    }
+} catch {
+    Write-Host "$dot Could not install Ruff. Python formatting stays off until it is installed." -ForegroundColor Yellow
+}
+
+# Jupyter + nbconvert: powers Run notebook on .ipynb files (larger, optional)
+Write-Host "$dot Jupyter lets you run .ipynb notebooks from the file tree (a larger download)."
+if (Yes "Install Jupyter and nbconvert now?") {
+    try {
+        & $py -m pip install --quiet jupyter nbconvert 2>$null
+        & $py -m jupyter --version 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "$dot $ok Jupyter installed (right-click a .ipynb to run it)"
+        } else {
+            Write-Host "$dot Jupyter did not install cleanly. Try '$py -m pip install jupyter nbconvert' later." -ForegroundColor Yellow
+        }
+    } catch {
+        Write-Host "$dot Could not install Jupyter. Notebook run stays off until it is installed." -ForegroundColor Yellow
+    }
+} else {
+    Write-Host "$dot Skipped. Install later with '$py -m pip install jupyter nbconvert' to run notebooks."
 }
 
 # ---- 4. Git ----------------------------------------------------------
@@ -132,20 +166,21 @@ if (Have claude) {
     Write-Host "$dot Or skip it and use a local Ollama model, or add an OpenAI/Gemini/Grok key in Settings."
 }
 
-# ---- 7. Pandoc (optional, for LaTeX -> Word export) -----------------
-Section 7 "Pandoc (optional, for the LaTeX to Word export tool)"
+# ---- 7. Pandoc (optional, Word/PDF export from LaTeX or Markdown) ----
+Section 7 "Pandoc (optional, for the Word and PDF export tools)"
 $pandoc = $null
 if (Have pandoc) { $pandoc = "pandoc" }
 elseif (Test-Path "$env:LocalAppData\Pandoc\pandoc.exe") { $pandoc = "$env:LocalAppData\Pandoc\pandoc.exe" }
 if ($pandoc) {
-    Write-Host "$dot $ok Found Pandoc (LaTeX to Word export enabled)"
+    Write-Host "$dot $ok Found Pandoc (LaTeX and Markdown export to Word/PDF enabled)"
 } else {
-    Write-Host "$dot Not found. The Tools > Export LaTeX to Word feature needs it."
+    Write-Host "$dot Not found. The Tools > Export to Word (.docx) and Markdown to PDF features need it."
+    Write-Host "$dot PDF export also uses your LaTeX distribution (step 5) as the PDF engine."
     if ((Have winget) -and (Yes "Install Pandoc now with winget?")) {
         winget install --id JohnMacFarlane.Pandoc --accept-source-agreements --accept-package-agreements --silent
         Write-Host "$dot $ok Pandoc install finished (open a new terminal so it is on PATH)."
     } else {
-        Write-Host "$dot Skipped. Install later from https://pandoc.org if you want Word export."
+        Write-Host "$dot Skipped. Install later from https://pandoc.org if you want Word or PDF export."
     }
 }
 
@@ -161,7 +196,7 @@ if (Have ollama) {
 Write-Host ""
 Write-Host "=====================================================" -ForegroundColor DarkCyan
 Write-Host " Setup complete." -ForegroundColor Green
-Write-Host " Start the app by double clicking run_workbench.bat" -ForegroundColor White
+Write-Host " Start the app by double clicking run_beacon.bat" -ForegroundColor White
 Write-Host "=====================================================" -ForegroundColor DarkCyan
 Write-Host ""
 Read-Host "Press Enter to close"

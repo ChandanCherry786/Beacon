@@ -6,7 +6,7 @@
 
 <p align="center">A local research IDE for LaTeX manuscripts and Python code, built for researchers.</p>
 
-Beacon gives you a file tree over any folder, a tabbed editor with Overleaf-style autocomplete and syntax highlighting, embedded PDF and image viewing, a live Markdown reader, one-click LaTeX compile with live preview and automatic package installation, a real interactive terminal, per-folder git with one-click multi-remote sync, an AI assistant with a choice of model (local Ollama, Claude, ChatGPT, Gemini, or Grok), a research finder over OpenAlex and Crossref with publisher-verified authors, LaTeX-to-Word export, and a Pomodoro focus timer.
+Beacon gives you a file tree over any folder, a tabbed editor with Overleaf-style autocomplete and syntax highlighting, embedded PDF and image viewing, a live Markdown reader, one-click LaTeX compile with live preview and automatic package installation, a real interactive terminal, per-folder git with one-click multi-remote sync, an AI assistant with a choice of model (local Ollama, Claude, ChatGPT, Gemini, or Grok), a research finder over OpenAlex and Crossref with publisher-verified authors, Word and PDF export from LaTeX or Markdown, Python formatting and notebook execution, and a Pomodoro focus timer.
 
 It is a single Python file plus one page, with one optional dependency (pywinpty, for the interactive terminal). The interface runs in a Microsoft Edge application window (or your default browser), served locally from `127.0.0.1:8347`. Nothing leaves your machine except the lookups and installs you explicitly trigger; any AI API keys you add stay in a git-ignored local file and are never committed.
 
@@ -16,9 +16,13 @@ It is a single Python file plus one page, with one optional dependency (pywinpty
 - **Tabbed editor** with syntax highlighting for LaTeX (commands, section headers, `\cite`/`\ref`, environments, math), Python, BibTeX, Markdown, and JSON. Line numbers, word count, and cursor position. Overleaf-style autocomplete for LaTeX commands and environments and for Python keywords, auto-closing brackets and `$`, automatic `\end` when you open a `\begin{}`, block indent with Tab, and comment toggling with Ctrl+/.
 - **Embedded PDF and image viewing.** Open any PDF or image (`.png`, `.jpg`, `.svg`, and more) as a tab and view it beside your source. PDF reading position is preserved across tab switches.
 - **Markdown reader.** Open any `.md` file and its rendered view (headings, tables, code, blockquotes, links) appears live in the Preview pane beside the source, updating as you type and matching the theme.
-- **LaTeX to Word export.** The Tools menu (or Ctrl+Shift+E) converts your paper to a `.docx` with Pandoc, preserving structure, headings, tables, equations, and citations rather than producing a lossy dump.
+- **Word and PDF export.** The Tools menu (or Ctrl+Shift+E) converts your LaTeX paper to a `.docx` with Pandoc, preserving structure, headings, tables, equations, and citations rather than producing a lossy dump. A Markdown file exports the same way to Word or to PDF, with a workspace `.bib` wired in through citeproc.
 - **LaTeX compile with live preview.** Compile the active `.tex` and the typeset page appears in the Preview pane. Compiling a section fragment builds the main document automatically. Missing packages are detected and installed with `tlmgr` without interrupting the build.
 - **Run Python** with your configured interpreter, output streamed live, with a Stop button.
+- **Run Jupyter notebooks.** Right-click a `.ipynb` in the file tree to execute every cell with nbconvert and save the outputs back into the file, with errors streamed to the Output panel.
+- **Format Python.** The Tools menu or the file tree reformats the file with Ruff, or Black when Ruff is absent, and reloads the editor from disk.
+- **Tidy BibTeX.** Right-click a `.bib` to drop entries with duplicate citation keys, sort the rest by key, and align every field, flagging entries that share a DOI. The original is copied to a `.bak` first, and a file whose braces do not balance is left untouched.
+- **LaTeX word count and build cleanup.** The Tools menu estimates the word count of a paper, following `\input` and `\include` while excluding commands, math, and comments, and removes regenerable build artifacts (`.aux`, `.log`, `.bbl`, `.synctex.gz`, and the rest) without touching source files.
 - **Full interactive terminal** in the workspace, rendered with xterm.js over a real pseudo-console (ConPTY via pywinpty). Interactive tools such as `claude`, `vim`, tab-completion, and colored output work inline. Without pywinpty it falls back to a simpler line-based terminal, so it always works.
 - **Git per folder.** The status badge follows the active file to its nearest repository, classifies each remote as GitHub, Overleaf, or local, and offers commit, pull, push, and fetch. One-click **Publish** (the Sync button, or Ctrl+Shift+S) commits, pulls, then pushes. When a folder has both a GitHub remote and an Overleaf remote it asks where to send the work in plain terms, Overleaf (documents) or GitHub (code) or both, so writing and code publish on your choice; with a single remote it just publishes, and with none it offers to connect one.
 - **Connect a folder to Overleaf or GitHub** (git menu, or Ctrl+Shift+O). Paste the Overleaf git URL and sync token to push a paper folder straight to your Overleaf project, or paste a GitHub repo URL and personal access token to push a code folder to GitHub. A document folder can go to Overleaf and a computational folder to GitHub, each with its own remote, so writing and code publish independently. The dialog links to where each URL and token live. The token is stored only inside that folder's local `.git/config` remote URL, never in the app config, never sent back to the page, and stripped from any error message; the connection is verified against the server before it is saved.
@@ -37,10 +41,12 @@ The application code needs only Python and its standard library. The features be
 | --- | --- | --- |
 | Python 3.9+ (with tkinter) | Runs the server and your Python files | Everything |
 | pywinpty (pip, optional) | Real interactive terminal (falls back to line terminal without it) | Interactive terminal |
+| Ruff or Black (pip, optional) | Reformat Python files from the Tools menu | Python formatting |
+| Jupyter with nbconvert (pip, optional) | Execute `.ipynb` notebooks and save outputs in place | Notebook run |
 | Git | Status, commit, pull, push, sync | Git features |
-| A TeX distribution with `latexmk` and `tlmgr` (TinyTeX or TeX Live) | LaTeX compilation and package install | Compile |
+| A TeX distribution with `latexmk` and `tlmgr` (TinyTeX or TeX Live) | LaTeX compilation, package install, and the PDF engine for Markdown export | Compile, Markdown to PDF |
 | Claude Code CLI (`claude`) | The Claude models in the assistant panel | Claude assistant |
-| Pandoc (optional) | LaTeX to Word (`.docx`) export | Word export |
+| Pandoc (optional) | Word (`.docx`) and PDF export from LaTeX or Markdown | Word and PDF export |
 | Ollama (optional) | Free local open-source AI models, no key | Local AI |
 | Microsoft Edge | The application window (falls back to your default browser) | Preferred |
 | Internet access | Crossref/OpenAlex/doi.org lookups, `tlmgr` and hosted-AI calls | Finder, auto-install, hosted AI |
@@ -50,15 +56,15 @@ The toolkit was developed and verified on Windows 11 with Python 3.13.7, git 2.5
 ## Getting started
 
 ```bash
-git clone https://github.com/ChandanCherry786/research_workbench.git
-cd research_workbench
+git clone https://github.com/ChandanCherry786/Beacon.git
+cd Beacon
 ```
 
 **First-time setup (recommended).** Double-click `setup.bat` (or run `powershell -ExecutionPolicy Bypass -File setup.ps1`). It checks for Python, offers to create a local virtual environment, and offers to install anything missing, including a LaTeX distribution (TinyTeX). It never installs anything without asking, and it is safe to run more than once.
 
 Then launch the app.
 
-**Double-click** `run_workbench.bat`. It starts the server without a console window and opens the application window. It uses the `.venv` from setup if present, otherwise any Python on your PATH.
+**Double-click** `run_beacon.bat`. It starts the server without a console window and opens the application window. It uses the `.venv` from setup if present, otherwise any Python on your PATH.
 
 **Or from a terminal:**
 
@@ -135,7 +141,7 @@ beacon.py                 Local HTTP server and all backend logic
 workbench.html            Single-page front end (HTML, CSS, vanilla JS)
 sw.js                     Service worker (makes the app installable)
 vendor/                   Bundled xterm.js terminal and marked.js markdown renderer
-run_workbench.bat         Windows launcher
+run_beacon.bat            Windows launcher
 setup.bat / setup.ps1     First-time setup (checks tools, installs deps)
 Logo_icon.png, *.png, favicon.ico, manifest.webmanifest   App icons and PWA manifest
 workbench_config.json     Saved state and API keys (created on first run, git-ignored)

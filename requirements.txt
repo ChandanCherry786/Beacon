@@ -3,22 +3,30 @@
 #
 # PYTHON PACKAGES
 # ---------------
-# One optional package enables the full interactive terminal:
+# Every package here is OPTIONAL. Each one enables a single feature, and the
+# app works without it. The core server uses only the Python standard library.
 #
 #     pywinpty        Windows pseudo-console (ConPTY) for a real embedded
 #                     terminal where interactive tools (claude, vim, tab
-#                     completion, colors) work inline.
+#                     completion, colors) work inline. Without it the app
+#                     falls back to a simpler line-based terminal.
+#     ruff            Formats Python files from Tools > Format Python file.
+#                     Black also works if it is installed instead of Ruff.
+#     jupyter         Runs .ipynb notebooks (right-click a notebook > Run).
+#     nbconvert       The nbconvert engine used to execute those notebooks.
 #
-# Install with:  pip install -r requirements.txt
+# Install the small defaults with:  pip install -r requirements.txt
+# Jupyter is larger, so it stays commented below; uncomment it or run
+# `pip install jupyter nbconvert` if you work with notebooks.
 #
-# It is OPTIONAL. Without it the app automatically falls back to a simpler
-# line-based terminal (send a command, see the output) and everything else
-# works unchanged. Everything except the interactive terminal uses only the
-# Python standard library. The terminal front end (xterm.js) is vendored in
-# the vendor/ folder, so it needs no download or build.
+# The terminal front end (xterm.js) is vendored in the vendor/ folder, so it
+# needs no download or build.
 #
 # Python: 3.9+ (CPython, includes tkinter). Verified on 3.13.7.
 pywinpty
+ruff
+# jupyter
+# nbconvert
 #
 #
 # EXTERNAL SYSTEM TOOLS (not Python packages; install separately, on PATH).
