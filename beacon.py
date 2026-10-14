@@ -3543,10 +3543,17 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"job": job_id})
 
 
+class BeaconServer(ThreadingHTTPServer):
+    # On Windows SO_REUSEADDR lets a second Beacon bind the same port, and the
+    # two instances (each with its own session token) then split requests, so
+    # PDF frames and API calls fail with 403 at random. Bind exclusively there.
+    allow_reuse_address = os.name != "nt"
+
+
 def main():
     addr = ("127.0.0.1", PORT)
     try:
-        server = ThreadingHTTPServer(addr, Handler)
+        server = BeaconServer(addr, Handler)
     except OSError:
         # Port already bound: assume a workbench is running, just open a window.
         if "--no-browser" not in sys.argv:
