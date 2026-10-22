@@ -635,6 +635,10 @@ def synth_bibtex(d):
 COMPILERS = {
     "latexmk":  'latexmk -g -pdf -interaction=nonstopmode "{name}"',
     "pdflatex": 'pdflatex -interaction=nonstopmode "{name}"',
+    # No Perl needed (MiKTeX ships latexmk without it). Plain & so a file
+    # without a bibliography, where bibtex exits nonzero, still finishes.
+    "pdfbib":   'pdflatex -interaction=nonstopmode "{name}" & bibtex "{stem}" & '
+                'pdflatex -interaction=nonstopmode "{name}" & pdflatex -interaction=nonstopmode "{name}"',
     "xelatex":  'latexmk -g -xelatex -interaction=nonstopmode "{name}"',
     "lualatex": 'latexmk -g -lualatex -interaction=nonstopmode "{name}"',
 }
@@ -2417,7 +2421,7 @@ class Handler(BaseHTTPRequestHandler):
                     job_emit(job_id, "err" if line.startswith("!") else "out", line)
 
                 job_emit(job_id, "info", f"{compiler}: {name}")
-                rc = run_step(job_id, template.format(name=name), folder, 600, scan)
+                rc = run_step(job_id, template.format(name=name, stem=os.path.splitext(name)[0]), folder, 600, scan)
                 if rc == 0 or not missing[0]:
                     break
                 miss = missing[0]
